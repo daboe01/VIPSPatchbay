@@ -2,9 +2,8 @@
  * InspectorController.j
  * VIPS Patchbay
  *
- * Created by Daniel Boehringer on October 30, 2024.
- * Adapted from user-provided CompoController.
- * Copyright 2024, All rights reserved.
+ * Created by Daniel Boehringer in August, 2025.
+ * Copyright 2025, All rights reserved.
  */
 
 @import <Foundation/CPObject.j>
@@ -41,7 +40,9 @@
 {
     id _panel;
     id _project;
-    id _blockSettingsControllers; // A dictionary to hold controllers for each block's settings
+    id _inspectorDataController;  // A single ArrayController for our one data object
+    id _combinedDataObject;        // The single, flat dictionary holding all parameters
+    id _allWidgetsView;           // The top-level view with all generated controls
 }
 
 - (id)initWithProject:(id)aProject
@@ -49,13 +50,20 @@
     if (!(self = [self init])) return nil;
 
     _project = aProject;
-    _blockSettingsControllers = [CPMutableDictionary dictionary];
+
+    // === Step 1: Create the single data model ===
+
+    _inspectorDataController = [CPArrayController new];
+    _combinedDataObject = [CPMutableDictionary dictionary];
+    // This object doesn't correspond to a DB entity, so we give it a dummy ID
+    [_combinedDataObject setObject:@"1" forKey:@"id"];
+
 
     var blocks = [_project valueForKey:@"blocks"];
     var settingsBlocks = [blocks filteredArrayUsingPredicate:[CPPredicate predicateWithFormat:@"block_type.gui_xml != NULL AND block_type.gui_xml != ''"]];
 
-    // Step 1: Build the panel via dynamically generated markup
-    var markup = '<?xml version="1.0"?><!DOCTYPE gsmarkup><gsmarkup><objects><window id="panel" title="Inspector" closable="yes" resizable="YES" x="800" y="50" width="400" height="700"><vbox><scrollView halign="expand" valign="expand" hasHorizontalScroller="NO"><vbox id="toplevel_container" halign="min" width="380">';
+    // === Step 2: Populate the flat data dictionary and build the master XML string ===
+    var markupContent = '';
 
     for (var i = 0; i < [settingsBlocks count]; i++)
     {
@@ -64,27 +72,114 @@
         var blockName = [block valueForKeyPath:'block_type.name'];
         var gui_xml = [block valueForKeyPath:'block_type.gui_xml'];
 
-        // Create a dedicated array controller for this block's settings
-        var settingsController = [FSArrayController new];
-        [settingsController setEntityName:@"settings"];
-        [settingsController bind:CPContentBinding toObject:block withKeyPath:@"settings" options:nil];
-        [_blockSettingsControllers setObject:settingsController forKey:blockId];
+        // A. Populate the _combinedDataObject
+        var settingsJSON = JSON.parse([block valueForKey:@"output_value"] || '{}');
+        for (var key in settingsJSON) {
+            if (settingsJSON.hasOwnProperty(key)) {
+                var newKey = key + "@" + blockId; // Create the unique key, e.g., "sigma@104"
+                [_combinedDataObject setObject:settingsJSON[key] forKey:newKey];
+            }
+        }
 
-        markup += '<label halign="left" font="bold 14px Lucida Grande">' + blockName + ' (id: ' + blockId + ')</label>';
-        // We inject a reference to our per-block controller into the binding path
-        var processed_xml = [gui_xml stringByReplacingOccurrencesOfString:'valueBinding="#CPOwner.' withString:'valueBinding="#CPOwner._blockSettingsControllers.' + blockId + '.'];
-        markup += processed_xml;
-        markup += '<divider/>';
+        // B. Add this block's GUI definition to our master string
+        markupContent += '<label halign="left" font="bold 14px Lucida Grande">' + blockName + ' (id: ' + blockId + ')</label>';
+
+        // C. Transform 'column' attributes to bind to the unique key in our flat dictionary
+        var bindingPrefix = '_inspectorDataController.selection.';
+        // This regex replacement is more robust than a simple string replace.
+        // It finds 'column="xyz"' and replaces it with a full binding to 'xyz@blockId'.
+
+        var processed_xml = (gui_xml + '').replace(/column="([^"]+)"/g, 'valueBinding="#CPOwner.' + bindingPrefix + '$1@' + blockId + '"');
+        markupContent += processed_xml;
+        markupContent += '<divider/>';
     }
 
-    markup += '</vbox></scrollView></vbox></window></objects><connectors><outlet source="#CPOwner" target="panel" label="_panel"/></connectors></gsmarkup>';
+    // Add the populated data object to its controller
+    [_inspectorDataController addObject:_combinedDataObject];
 
-    // Step 2: Load the generated markup
-    [CPBundle loadGSMarkupData:[CPData dataWithRawString: markup] externalNameTable:[CPDictionary dictionaryWithObject:self forKey:"CPOwner"]
-        localizableStringsTable: nil inBundle: nil tagMapping: nil];
+    // === Step 3: Assemble and parse the final GSMarkup document ===
+    var finalMarkup = '<?xml version="1.0"?> <!DOCTYPE gsmarkup> <gsmarkup> <objects> <vbox id="widgets">' + markupContent +
+    '</vbox> </objects> <connectors> <outlet source="#CPOwner" target="widgets" label="_allWidgetsView"/> </connectors></gsmarkup>';
 
+    [CPBundle loadGSMarkupData:[CPData dataWithRawString:finalMarkup]
+             externalNameTable:[CPDictionary dictionaryWithObject:self forKey:"CPOwner"]
+       localizableStringsTable:nil inBundle:nil tagMapping:nil];
+
+
+    // === Step 4: Build the window, add a "Save" button, and place the view ===
+    _panel = [[CPWindow alloc] initWithContentRect:CGRectMake(800, 50, 400, 700) styleMask:CPTitledWindowMask | CPClosableWindowMask | CPResizableWindowMask];
     [_panel setTitle:"Inspector for: " + [_project valueForKey:"name"]];
+
+    var mainVBox = [[CPView alloc] initWithFrame:[[_panel contentView] bounds]];
+    [mainVBox setAutoresizingMask:CPViewWidthSizable | CPViewHeightSizable];
+    [[_panel contentView] addSubview:mainVBox];
+
+    var scrollView = [[CPScrollView alloc] initWithFrame:CGRectMake(0, 30, [_panel frame].size.width, [_panel frame].size.height - 30)];
+    [scrollView setAutoresizingMask:CPViewWidthSizable | CPViewHeightSizable];
+    [mainVBox addSubview:scrollView];
+
+    var saveButton = [[CPButton alloc] initWithFrame:CGRectMake(10, 5, 80, 24)];
+    [saveButton setTitle:"Save"];
+    [saveButton setTarget:self];
+    [saveButton setAction:@selector(saveChanges:)];
+    [mainVBox addSubview:saveButton];
+
+    if (_allWidgetsView) {
+        [scrollView setDocumentView:_allWidgetsView];
+    }
+
     return self;
+}
+
+- (void)saveChanges:(id)sender
+{
+    // This method deconstructs the flat dictionary and applies the changes
+    // back to the individual block objects.
+
+    var changesByBlockId = {};
+
+    // 1. Group all changes by their block ID using the correct iteration method
+    var allKeys = [_combinedDataObject allKeys];
+    for (var i = 0; i < [allKeys count]; i++) {
+        var key = [allKeys objectAtIndex:i];
+
+        if ([key containsString:'@']) {
+            var parts = [key componentsSeparatedByString:'@'];
+            var paramName = parts[0];
+            var blockId = parts[1];
+            var value = [_combinedDataObject objectForKey:key];
+
+            if (!changesByBlockId[blockId]) {
+                changesByBlockId[blockId] = {};
+            }
+            changesByBlockId[blockId][paramName] = value;
+        }
+    }
+
+    // 2. Apply the grouped changes to each block
+    var allBlocks = [_project valueForKey:@"blocks"];
+    for (var blockId in changesByBlockId) {
+        if (changesByBlockId.hasOwnProperty(blockId)) {
+            var blockChanges = changesByBlockId[blockId];
+            var predicate = [CPPredicate predicateWithFormat:@"id == %@", blockId];
+            var targetBlock = [[allBlocks filteredArrayUsingPredicate:predicate] lastObject];
+
+            if (targetBlock) {
+                var currentSettings = JSON.parse([targetBlock valueForKey:@"output_value"] || '{}');
+                // Merge the new changes into the existing settings
+                for (var paramName in blockChanges) {
+                    if (blockChanges.hasOwnProperty(paramName)) {
+                        currentSettings[paramName] = blockChanges[paramName];
+                    }
+                }
+
+                [targetBlock setValue:JSON.stringify(currentSettings) forKey:@"output_value"];
+            }
+        }
+    }
+
+    [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved."];
+    // fixme: rerun the project to apply changes
 }
 
 - (void)showWindow:(id)sender

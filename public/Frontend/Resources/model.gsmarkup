@@ -24,11 +24,13 @@
         <column name="id" primaryKey="YES"/>
         <column name="type"/>
         <column name="name"/>
+        <column name="display_name"/>
         <column name="inputs"/>
         <column name="outputs"/>
         <column name="default_value"/>
         <column name="gui_xml"/>
         <column name="gui_fields"/>
+        <column name="required_format"/>
     </entity>
     <entity id="blocks" store="#CPOwner.store">
         <column name="id" primaryKey="YES"/>

@@ -1,11 +1,11 @@
 /*
- * Cappuccino frontend for PatchbayLLM
+ * Cappuccino frontend for PatchbayVIPS
  *
- * Created by daboe01 on Dec, 29, 2023 by Daniel Boehringer.
- * Copyright 2023, All rights reserved.
+ * Created by daboe01 on Aug, 2025 by Daniel Boehringer.
+ * Copyright 2025, All rights reserved.
  *
- * Todo: bind label to block data in AppController so no reload is necessary after setting label name
- *
+ * Todo: support required_format + display_name in blocks_catalogue
+ *       support globals size slider for displaying the input and output images in the collectionviews
  *
  */
 
@@ -283,7 +283,6 @@ BaseURL=HostURL+"/";
     // Create a NEW instance of the inspector every time the button is clicked.
     // This ensures it's always up-to-date with the current blocks in the pipeline.
     _inspectorController = [[InspectorController alloc] initWithProject:selectedProject];
-
     // Tell the new controller to show its window.
     [_inspectorController showWindow:sender];
 }

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<!DOCTYPE gsmarkup>
+<gsmarkup>
+
+    <objects>
+        <sortDescriptor id="by_name" key="name"/>
+        <sortDescriptor id="by_id" key="id" numeric="YES"/>
+        <sortDescriptor id="by_insertiontime" key="insertion_time" ascending="NO"/>
+
+        <arrayController id="projects_controller" entity="projects" autoFetchSync="YES" sortDescriptor="by_name"/>
+        <arrayController id="input_controller" entity="input_images" autoFetchSync="YES" sortDescriptor="by_id"/>
+        <arrayController id="blocks_controller" entity="blocks" valueBinding="projects_controller.selection.blocks" sortDescriptor="by_id"/>
+        <arrayController id="settings_controller" entity="settings" valueBinding="blocks_controller.selection.settings"/>
+        <arrayController id="blocks_catalogue_controller" entity="blocks_catalogue" autoFetchSync="YES" sortDescriptor="by_name"/>
+    </objects>
+
+<entities>
+    <entity id="projects" store="#CPOwner.store">
+        <column name="id" primaryKey="YES"/>
+        <column name="name"/>
+        <relationship type="toMany" name="blocks" bindingColumn="id" target="blocks" targetColumn="idproject"/>
+    </entity>
+    <entity id="blocks_catalogue" store="#CPOwner.store">
+        <column name="id" primaryKey="YES"/>
+        <column name="type"/>
+        <column name="name"/>
+        <column name="inputs"/>
+        <column name="outputs"/>
+        <column name="default_value"/>
+        <column name="gui_xml"/>
+        <column name="gui_fields"/>
+    </entity>
+    <entity id="blocks" store="#CPOwner.store">
+        <column name="id" primaryKey="YES"/>
+        <column name="idblock"/>
+        <column name="idproject"/>
+        <column name="name"/>
+        <column name="connections"/>
+        <column name="output_value"/>
+        <column name="originX"/>
+        <column name="originY"/>
+        <relationship type="toOne" name="block_type" bindingColumn="idblock" target="blocks_catalogue"/>
+        <relationship type="toOne" name="settings" bindingColumn="id" target="settings"/>
+    </entity>
+    <entity id="settings" store="#CPOwner.store">
+        <column name="id" primaryKey="YES"/>
+    </entity>
+    <entity id="input_images" store="#CPOwner.store">
+        <column name="id" primaryKey="YES"/>
+        <column name="title"/>
+        <column name="content"/>
+        <column name="insertion_time"/>
+        <column name="idprompt"/>
+        <relationship type="toMany" name="output" bindingColumn="id" target="output_images" targetColumn="idinput"/>
+    </entity>
+</entities>
+
+<connectors>
+    <outlet source="#CPOwner" target="blocks_controller" label="blocksController"/>
+    <outlet source="#CPOwner" target="settings_controller" label="settingsController"/>
+    <outlet source="#CPOwner" target="blocks_catalogue_controller" label="blocksCatalogueController"/>
+    <outlet source="#CPOwner" target="input_controller" label="inputController"/>
+    <outlet source="#CPOwner" target="projects_controller" label="projectsController"/>
+</connectors>
+
+
+</gsmarkup>

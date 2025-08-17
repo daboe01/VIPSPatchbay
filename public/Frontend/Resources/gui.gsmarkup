@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<!DOCTYPE gsmarkup>
+<gsmarkup>
+    <objects>
+
+        <window id="add_blocks_window" visible="NO" width="400" height="600">
+            <vbox>
+                <scrollView hasHorizontalScroller="NO">
+                    <tableView zebra="yes" valueBinding="#CPOwner.blocksCatalogueController" allowsMultipleSelection="YES" target="#CPOwner" doubleAction="performAddBlocks:">
+                        <tableColumn identifier="name" title="name" width="300" editable="NO"/>
+                    </tableView>
+                </scrollView>
+                <hbox>
+                    <button title="Add" target="#CPOwner" action="performAddBlocks:"/>
+                    <hspace/>
+                    <button title="Cancel" target="#CPOwner" action="cancelAddBlocks:"/>
+                </hbox>
+            </vbox>
+        </window>
+
+        <window title="Edit" x="260" y="100" width="300" height="600" visible="NO"  resizable="YES" id="edit_window">
+            <vbox>
+                <scrollView hasHorizontalScroller="NO" width="100" height="200" backgroundColor="white">
+                    <textView editable="YES" valueBinding="#CPOwner.blocksController.selection.output_value" backgroundColor="white"/>
+                </scrollView>
+            </vbox>
+        </window>
+
+        <window bridge="YES" id="mainwindow" delegate="#CPOwner">
+            <vbox>
+                <splitView vertical="YES" autosaveName="vsplitter_main_vips_top1">
+                    <vbox width="250">
+                        <hbox>
+                            <label title="Input Images"/>
+                            <hspace/>
+                            <button title="⟳" target="#CPOwner" action="reloadInputImages:"/>
+                        </hbox>
+                        <scrollView>
+                            <collectionView valueBinding="#CPOwner.inputController.arrangedObjects"
+                                            itemsClassName="SimpleImageViewCollectionItem"
+                                            selectable="YES" allowsMultipleSelection="NO"/>
+                        </scrollView>
+                    </vbox>
+
+                    <vbox height="150">
+                        <label title="Pipelines"/>
+                        <scrollView hasHorizontalScroller="YES">
+                            <tableView zebra="yes" id="projects_tv" autosaveName="projects_tv" valueBinding="#CPOwner.projectsController" target="#CPOwner" allowsEmptySelection="NO">
+                                <tableColumn identifier="id" title="id" editable="NO" width="40"/>
+                                <tableColumn identifier="name" title="Pipeline Name" editable="YES" width="200"/>
+                            </tableView>
+                        </scrollView>
+                        <ButtonBar target="#CPOwner.projectsController" actionsButton="NO" minusButtonAction="remove:" plusButtonAction="insert:"/>
+                    </vbox>
+
+                    <vbox>
+                        <hbox>
+                            <button title="Add Operator..." target="#CPOwner" action="addBlocks:"/>
+                            <button title="Delete Selected" target="#CPOwner" action="removeBlocks:"/>
+                            <hspace/>
+                            <button title="Show Inspector" target="#CPOwner" action="showInspector:"/>
+                            <hspace/>
+                            <button title="Run Pipeline" target="#CPOwner" action="run:"/>
+                        </hbox>
+                        <scrollView>
+                            <patchbayView id="lace_view" width="2000" height="2000" halign="min" valign="min"/>
+                        </scrollView>
+                    </vbox>
+
+                    <vbox width="250">
+                        <hbox>
+                            <label title="Output Images"/>
+                            <hspace/>
+                            <button title="⟳" target="#CPOwner" action="reloadOutputImages:"/>
+                        </hbox>
+                    </vbox>
+                </splitView>
+            </vbox>
+        </window>
+
+    </objects>
+    <connectors>
+        <outlet source="CPOwner" target="mainwindow" label="mainWindow"/>
+        <outlet source="CPOwner" target="lace_view" label="laceView"/>
+        <outlet source="CPOwner" target="add_blocks_window" label="addBlocksWindow"/>
+        <outlet source="CPOwner" target="edit_window" label="editWindow"/>
+    </connectors>
+</gsmarkup>

@@ -1,0 +1,334 @@
+/*
+ * Cappuccino frontend for PatchbayLLM
+ *
+ * Created by daboe01 on Dec, 29, 2023 by Daniel Boehringer.
+ * Copyright 2023, All rights reserved.
+ *
+ * Todo: bind label to block data in AppController so no reload is necessary after setting label name
+ *
+ *
+ */
+
+
+
+/////////////////////////////////////////////////////////
+
+HostURL=""
+BaseURL=HostURL+"/";
+
+/////////////////////////////////////////////////////////
+
+@import <Foundation/CPObject.j>
+@import <Renaissance/Renaissance.j>
+@import "TNGrowlCenter.j";
+@import "TNGrowlView.j";
+@import "LaceViewController.j";
+@import "InspectorController.j";
+
+@import <Cup/Cup.j>
+
+@implementation CGPTURLRequest : CPURLRequest
+
+- (id)initWithURL:(CPURL)anURL cachePolicy:(CPURLRequestCachePolicy)aCachePolicy timeoutInterval:(CPTimeInterval)aTimeoutInterval
+{
+    if (self = [super initWithURL:anURL initWithURL:anURL cachePolicy:aCachePolicy timeoutInterval:aTimeoutInterval])
+    {
+        [self setValue:"3037" forHTTPHeaderField:"X-ARGOS-ROUTING"];
+    }
+
+    return self;
+}
+
+@end
+
+@implementation SessionStore : FSStore 
+
+- (CPURLRequest)requestForAddressingObjectsWithKey: aKey equallingValue: (id) someval inEntity:(FSEntity) someEntity
+{
+    var request = [CGPTURLRequest requestWithURL: [self baseURL]+"/"+[someEntity name]+"/"+aKey+"/"+someval];
+
+    return request;
+}
+-(CPURLRequest) requestForInsertingObjectInEntity:(FSEntity) someEntity
+{
+    var request = [CPURLRequest requestWithURL: [self baseURL]+"/"+[someEntity name]+"/"+ [someEntity pk]];
+    [request setHTTPMethod:"POST"];
+
+    return request;
+}
+
+- (CPURLRequest)requestForFuzzilyAddressingObjectsWithKey: aKey equallingValue: (id) someval inEntity:(FSEntity) someEntity
+{
+    var request = [CGPTURLRequest requestWithURL: [self baseURL]+"/"+[someEntity name]+"/"+aKey+"/like/"+someval];
+
+    return request;
+}
+
+- (CPURLRequest)requestForAddressingAllObjectsInEntity:(FSEntity) someEntity
+{
+    var request = [CGPTURLRequest requestWithURL: [self baseURL]+"/"+[someEntity name] ];
+
+    return request;
+}
+
+@end
+
+@implementation AppController : CPObject
+{
+    id  store @accessors;
+
+    id  mainWindow;
+    id  editWindow;
+    id  addBlocksWindow;
+    id  laceView;
+    id  laceViewController;
+    id  projectsController @accessors;
+    id  inputController;
+    id  blocksCatalogueController @accessors;
+    id  blocksController @accessors;
+    id  settingsController @accessors;
+    id  blockIndex;
+    id  connections;
+    id  addBlocksPopover;
+    id  editPopover;
+    id  runConnection;
+    id  spinnerImg;
+
+    // Upload properties
+    id myCuploader;
+    id queueController;
+    id inspectorController;
+}
+
+- (void)flushGUI
+{
+    var fr = [[CPApp keyWindow] firstResponder];
+
+    if ([fr respondsToSelector:@selector(_reverseSetBinding)])
+        [fr _reverseSetBinding]; // flush any typed text before printing
+
+
+    if ([fr isKindOfClass:CPDatePicker])
+        [fr resignFirstResponder]; // important for the textual datepicker to work properly
+}
+
+
+-(void)setButtonBusy:(CPButton)myButton
+{
+    myButton._oldImage = [myButton image];
+    [myButton setImage:spinnerImg];
+    [myButton setValue:spinnerImg forThemeAttribute:@"image" inState:CPThemeStateDisabled];
+    [myButton setEnabled:NO];
+}
+-(void)resetButtonBusy:(CPButton)myButton
+{
+    [myButton setImage:myButton._oldImage];
+    [myButton setEnabled:YES];
+}
+
+- (void)performImportCSV:(id)sender suffix:(CPString)suffix
+{
+    var myreq = [CPURLRequest requestWithURL:"/LLM/import_embedding_dataset/" + [embeddedDatasetsController valueForKeyPath:"selection.id"] + suffix];
+    [myreq setHTTPMethod:"POST"];
+    [myreq setHTTPBody:[importCSVText stringValue]];
+    [CPURLConnection connectionWithRequest:myreq delegate:nil];
+
+    [importCSVText setString:'']; // fixme: better gui feedback
+}
+
+- (void)performImportCSV:(id)sender
+{
+    [self performImportCSV:sender suffix:""];
+}
+
+- (void)performImportCSVAppend:(id)sender
+{
+    [self performImportCSV:sender suffix:"?preserve=1"];
+}
+
+- (void)performImportCSVRemove:(id)sender
+{
+    [self performImportCSV:sender suffix:"?remove=1"];
+}
+
+-(void)openWindowWithURL:(CPString)myURL inWindowID:(CPString)myid
+{
+    // window.removeEventListener('beforeunload', beforeUnloadHandler);
+    window.open(myURL, myid);
+    // window.addEventListener('beforeunload', beforeUnloadHandler);
+}
+
+- (void)downloadDataset:(id)sender
+{
+    [self openWindowWithURL:'/LLM/get_data_from_dataset/' + [embeddedDatasetsController valueForKeyPath:'selection.name'] inWindowID:'download_window'];
+}
+
+- (void)run:(id)sender
+{
+    [self flushGUI];
+
+    var selectedImage = [inputImagesController selection];
+    var selectedProject = [projectsController selection];
+
+    if (!selectedImage) {
+        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Please select an input image from the left panel." customIcon:TNGrowlIconError];
+        return;
+    }
+    if (!selectedProject) {
+        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Please select a pipeline to run." customIcon:TNGrowlIconError];
+        return;
+    }
+
+    var payload =  @{
+                        idproject: [selectedProject valueForKey:"id"],
+                        input_uuid: [selectedImage valueForKey:'uuid']
+                    };
+
+    // This is the corrected request logic
+    setTimeout(function(){
+        var myreq = [CPURLRequest requestWithURL:"/VIPS/run"];
+        [myreq setHTTPMethod:"POST"];
+
+        // Serialize the payload object to JSON and set it as the body
+        [myreq setHTTPBody:[payload toJSON]];
+
+        // Set the correct header so the backend knows to parse JSON
+        [myreq setValue:"application/json" forHTTPHeaderField:"Content-Type"];
+
+        runConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
+        [self setButtonBusy:sender];
+        runConnection._senderButton = sender;
+    }, 250);
+}
+
+- (void)insertInput:(id)sender
+{
+    [inputController insert:sender]
+    [inputWindow makeKeyAndOrderFront:sender]
+    [inputText selectAll:sender]
+}
+
+- (void)removeInput:(id)sender
+{
+    [inputController remove:sender]
+}
+
+- (void)removeBlocks:(id)sender
+{
+    [laceViewController removeBlocks:sender]
+}
+
+- (void)addBlocks:(id)sender
+{
+    [laceViewController addBlocks:sender]
+}
+
+- (void)performAddBlocks:(id)sender
+{
+    [laceViewController performAddBlocks:sender]
+}
+
+- (void)reloadInputImages:(id)sender
+{
+    var req = [CPURLRequest requestWithURL:"/VIPS/list_images"];
+    [CPURLConnection sendAsynchronousRequest:req queue:[CPOperationQueue mainQueue] completionHandler:
+             function(response, data, error) {
+             if (!error) {
+                var images = JSON.parse(data);
+                [inputController setContent:images];
+            }
+        }
+    ];
+}
+
+- (void)reloadOutputImages:(id)sender
+{
+    // Note: The concept of "output images" is less clear now. We can list
+    // the contents of the image_cache instead. We'll need a backend endpoint for this.
+    // For now, let's just reload the input images again as a placeholder.
+    // TODO: Create a backend route to list cached images.
+    [self reloadInputImages:sender];
+}
+
+- (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
+{
+    if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
+        [self resetButtonBusy:someConnection._senderButton];
+
+    var result = JSON.parse(data);
+
+    if (result && result['result']) {
+        // The result is a filename. We ask the backend to serve it.
+        var imagePath = result['result'];
+        // We need to extract just the filename part for the URL
+        var filename = imagePath.split('/').pop();
+        var imageURL = "/VIPS/preview/" + filename;
+        [imagePreviewView setImage:[[CPImage alloc] initWithContentsOfURL:imageURL]];
+    } else {
+        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Image processing failed. Check backend logs." customIcon:TNGrowlIconError];
+    }
+
+    [outputController reload];
+}
+
+- (void)showInspector:(id)sender
+{
+    var selectedProject = [projectsController selection];
+
+    if (!selectedProject) {
+        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Notice" message:"Please select a pipeline first."];
+        return;
+    }
+
+    // Create a NEW instance of the inspector every time the button is clicked.
+    // This ensures it's always up-to-date with the current blocks in the pipeline.
+    _inspectorController = [[InspectorController alloc] initWithProject:selectedProject];
+
+    // Tell the new controller to show its window.
+    [_inspectorController showWindow:sender];
+}
+
+- (void)cup:(Cup)aCup uploadDidCompleteForFile:(CupFile)aFile
+{
+    // remove from list
+    var indexes = [aCup.queue indexesOfObjectsPassingTest:function(file)
+                   {
+        return  file === aFile;
+    }];
+    [aCup.queue removeObjectsAtIndexes:indexes];
+    [[aCup queueController] setContent:aCup.queue];
+}
+
+- (void)applicationDidFinishLaunching:(CPNotification)aNotification
+{
+    // Point the store to the new /VIPS endpoint
+    store = [[SessionStore alloc] initWithBaseURL:HostURL+"/VIPS"];
+
+    [CPBundle loadRessourceNamed:"model.gsmarkup" owner:self];
+    [CPBundle loadRessourceNamed:"gui.gsmarkup" owner:self];
+    spinnerImg = [[CPImage alloc] initWithContentsOfFile:[CPString stringWithFormat:@"%@%@", [[CPBundle mainBundle] resourcePath], "spinner.gif"]];
+
+    // Initialize Uploader to the /VIPS/upload endpoint
+    myCuploader = [[Cup alloc] initWithURL:BaseURL + "VIPS/upload"];
+    queueController = [myCuploader queueController];
+    // We can set the main window content as a drop target
+    [myCuploader setDropTarget:[mainWindow contentView]];
+    [myCuploader setAutoUpload:YES];
+    [myCuploader setRemoveCompletedFiles:YES];
+    [myCuploader setDelegate:self];
+
+    [[TNGrowlCenter defaultCenter] setView:[[CPApp mainWindow] contentView]];
+    [[TNGrowlCenter defaultCenter] setLifeDefaultTime:10];
+    [[mainWindow contentView] setBackgroundColor:[CPColor colorWithWhite:0.95 alpha:1.0]];
+
+    laceViewController = [LaceViewController new];
+    [laceViewController setView:laceView];
+    [laceViewController setBlocksController:blocksController];
+    [laceViewController setSettingsController:settingsController];
+    [laceViewController setEditWindow:editWindow];
+    [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
+
+    [self reloadInputImages:nil];
+}
+
+@end

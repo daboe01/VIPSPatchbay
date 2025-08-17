@@ -1,0 +1,12 @@
+# Cappuccino build files
+build/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+
+# OS X files
+.DS_Store
+._*
+secrets.pm
+hypnotoad.pid

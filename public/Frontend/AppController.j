@@ -6,6 +6,11 @@
  *
  * Todo: support required_format + display_name in blocks_catalogue
  *       support globals size slider for displaying the input and output images in the collectionviews
+
+ *       make inputController dependent on projectController
+ *       support disabling / enabling of blocks via the context menu ("defaultMenu") (they are displayed grayed out in this case)
+ *       support probe image windows (command in main menu). these windows can be connected to any block (control-dragging) and show the output image in realtime
+ *       change size for the imageviews in the collectionviews to the real image size on load (currently they are fixed 100x100px)
  *
  */
 
@@ -26,6 +31,35 @@ BaseURL=HostURL+"/";
 @import "InspectorController.j";
 
 @import <Cup/Cup.j>
+
+@implementation SimpleImageViewCollectionItem : CPCollectionViewItem
+{
+    CPImageView _imageView;
+}
+
+- (CPView)loadView
+{
+    debugger
+    _imageView = [CPImageView new];
+    [self setView:_imageView];
+
+    var dataObject = [self representedObject];
+
+    if (dataObject)
+        [_imageView setImage:[[CPImage alloc] initWithContentsOfFile:"/VIPS/preview/" + [dataObject valueForKey:@"uuid"]]];
+    else
+        [_imageView setImage:nil];
+
+    return _imageView;
+}
+
+- (void)setRepresentedObject:(id)anObject
+{
+    [super setRepresentedObject:anObject];
+    [self loadView];
+}
+
+@end
 
 @implementation CGPTURLRequest : CPURLRequest
 
@@ -228,28 +262,6 @@ BaseURL=HostURL+"/";
     [laceViewController performAddBlocks:sender]
 }
 
-- (void)reloadInputImages:(id)sender
-{
-    var req = [CPURLRequest requestWithURL:"/VIPS/list_images"];
-    [CPURLConnection sendAsynchronousRequest:req queue:[CPOperationQueue mainQueue] completionHandler:
-             function(response, data, error) {
-             if (!error) {
-                var images = JSON.parse(data);
-                [inputController setContent:images];
-            }
-        }
-    ];
-}
-
-- (void)reloadOutputImages:(id)sender
-{
-    // Note: The concept of "output images" is less clear now. We can list
-    // the contents of the image_cache instead. We'll need a backend endpoint for this.
-    // For now, let's just reload the input images again as a placeholder.
-    // TODO: Create a backend route to list cached images.
-    [self reloadInputImages:sender];
-}
-
 - (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
 {
     if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
@@ -326,8 +338,6 @@ BaseURL=HostURL+"/";
     [laceViewController setSettingsController:settingsController];
     [laceViewController setEditWindow:editWindow];
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
-
-    [self reloadInputImages:nil];
 }
 
 @end

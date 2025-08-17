@@ -49,11 +49,8 @@
     </entity>
     <entity id="input_images" store="#CPOwner.store">
         <column name="id" primaryKey="YES"/>
-        <column name="title"/>
-        <column name="content"/>
-        <column name="insertion_time"/>
-        <column name="idprompt"/>
-        <relationship type="toMany" name="output" bindingColumn="id" target="output_images" targetColumn="idinput"/>
+        <column name="uuid"/>
+        <column name="original_filename"/>
     </entity>
 </entities>
 

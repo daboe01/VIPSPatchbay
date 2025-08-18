@@ -49,7 +49,7 @@ BaseURL=HostURL+"/";
 {
     if (!_imageView) {
         _imageView = [CPImageView new];
-        [_imageView setImageScaling:CPScaleToFit];
+        [_imageView setImageScaling:CPImageScaleProportionallyUpOrDown];
     }
     
     [self setView:_imageView];
@@ -152,11 +152,24 @@ BaseURL=HostURL+"/";
     id  runConnection;
     id  outputImagesConnection;
     id  spinnerImg;
+    id  inputCollectionView;
+    id  outputCollectionView;
 
     // Upload properties
     id myCuploader;
     id queueController;
     id inspectorController;
+}
+
+- (void)setThumbnailSize:(id)sender
+{
+    var size = [sender intValue];
+    [inputCollectionView setMinItemSize:CPMakeSize(size, size)];
+    [inputCollectionView setMaxItemSize:CPMakeSize(size, size)];
+    [outputCollectionView setMinItemSize:CPMakeSize(size, size)];
+    [outputCollectionView setMaxItemSize:CPMakeSize(size, size)];
+    [inputCollectionView setNeedsLayout:YES];
+    [outputCollectionView setNeedsLayout:YES];
 }
 
 - (void)flushGUI

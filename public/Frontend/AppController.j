@@ -299,6 +299,11 @@ BaseURL=HostURL+"/";
     outputImagesConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
 }
 
+- (void)reloadOutputImages:(id)sender
+{
+    [self reloadOutputImagesForProject:[projectsController selection]];
+}
+
 - (void)observeValueForKeyPath:(CPString)keyPath ofObject:(id)object change:(CPDictionary)change context:(void)context
 {
     if (object === projectsController && keyPath === @"selection") {

@@ -1,6 +1,6 @@
-# backend for PatchbayLabs
-# 29.10.24 by daniel boehringer
-# Copyright 2024, All rights reserved.
+# backend for PatchbayVIPS
+# Aug.25 by daniel boehringer
+# Copyright 2025, All rights reserved.
 #
 
 use Mojolicious::Lite;
@@ -187,18 +187,67 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
         return $self->render(status => 404, json => { error => "Output block not found for project $projectid" });
     }
 
+    warn Dumper $block;
     my $result_uuid = $self->get_result_of_block_id($block->{id}, $input_uuid);
+    warn $result_uuid;
 
-    if ($result_uuid) {
-        my $image_file = $IMAGE_STORE_DIR->child($result_uuid);
-        if (-e $image_file) {
-            return $self->reply->file($image_file);
-        } else {
-            return $self->render(status => 404, text => 'Result image not found on disk.');
-        }
-    } else {
+    unless ($result_uuid) {
         return $self->render(status => 500, json => { error => "Pipeline execution failed for input $input_uuid." });
     }
+
+    my $image_file = $IMAGE_STORE_DIR->child($result_uuid);
+
+    unless (-e $image_file) {
+        $self->app->log->error("Processing finished, but result file not found: $image_file");
+        return $self->render(status => 404, text => 'Result image not found on disk.');
+    }
+
+    # 1. Create a temporary file object.
+    #    It will be automatically deleted when this sub returns, which is perfect.
+    my $temp = File::Temp->new(
+    SUFFIX => '.png',
+    UNLINK => 1
+    );
+    my $temp_filename = $temp->filename;
+
+    # 2. Build the command to write to the temporary file.
+    #    We no longer need to capture output, just check the exit status.
+    my @cmd = (
+                    'vips',
+                    'pngsave',
+                    $image_file->to_string,
+                    $temp_filename
+                );
+
+    # 3. Execute the command. The 'system' call is perfect for this.
+    #    We'll capture any error output for logging.
+    my $error_output = `@cmd 2>&1`;
+
+    # 4. Check the exit status. If it failed, log the error and return.
+    if ($? != 0) {
+        $self->app->log->error("Failed to convert final image to PNG. VIPS said: $error_output");
+        return $self->render(status => 500, text => "Failed to generate preview image.");
+    }
+
+    # 5. The command succeeded. Read the binary data from the temp file.
+    open(my $fh, '<:raw', $temp_filename) or do {
+        $self->app->log->error("Could not open temp file '$temp_filename' for reading: $!");
+        return $self->render(status => 500, text => "Server error reading temporary image.");
+    };
+
+    my $png_data;
+    {
+        local $/ = undef; # Slurp mode
+        $png_data = <$fh>;
+    }
+    close $fh;
+
+    # The $temp object will now go out of scope, and File::Temp will delete the file.
+
+    # 6. Send the image data to the browser.
+    $self->res->headers->content_type('image/png');
+
+    return $self->render(data => $png_data);
 };
 
 get '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
@@ -398,10 +447,21 @@ helper get_result_of_block_id => sub {
                                         )->hash;
 
     if ($cached) {
-        app->log->debug("Cache HIT for block $id");
-        return $cache_dict->{$id} = $cached->{uuid};
-    }
+        my $cached_uuid = $cached->{uuid};
+        my $cached_file = $IMAGE_STORE_DIR->child($cached_uuid);
 
+        # VERIFY that the cached file actually exists on disk.
+        if (-e $cached_file) {
+            app->log->debug("Cache HIT for block $id (file verified)");
+            return $cache_dict->{$id} = $cached_uuid;
+        }
+        else {
+            # The cache is stale. The file is missing.
+            app->log->warn("STALE CACHE: Hit for block $id, but file '$cached_file' is missing. Deleting entry and reprocessing.");
+            # Delete the orphaned entry to self-heal the cache.
+            $self->pg->db->query('DELETE FROM image_cache WHERE uuid = ?', $cached_uuid);
+        }
+    }
     app->log->debug("Cache MISS for block $id");
 
     # 3. Cache Miss: Prepare and execute the command

@@ -792,4 +792,27 @@ function treshold(x, tr)
     }
 }
 
+- (CPMenu)menuForEvent:(CPEvent)theEvent
+{
+    var mouseLoc = [self convertPoint:[theEvent locationInWindow] fromView:nil];
+    var subviews = [self subviews];
+    var clickedView = nil;
+
+    for (var i = 0; i < [subviews count]; i++) {
+        if (CGRectContainsPoint([subviews[i] frame], mouseLoc)) {
+            clickedView = subviews[i];
+            break;
+        }
+    }
+
+    if (clickedView) {
+        // A block was clicked, so show the context menu
+        if (_delegate && [_delegate respondsToSelector:@selector(defaultMenu)]) {
+            return [_delegate defaultMenu];
+        }
+    }
+
+    return [super menuForEvent:theEvent];
+}
+
 @end

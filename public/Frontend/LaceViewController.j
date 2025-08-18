@@ -85,6 +85,12 @@ BaseURL=HostURL+"/";
     id _addBlocksView @accessors(property = addBlocksView);
     id _connections;
     id _blockIndex;
+    id _defaultMenu @accessors(property = defaultMenu);
+}
+
+- (void)toggleBlockEnabledState:(id)sender
+{
+    // Placeholder for the action
 }
 
 + (void)connectBlock:(id)mydata toOtherBlock:(id)mydata2 usingOutletNamed:(CPString)name

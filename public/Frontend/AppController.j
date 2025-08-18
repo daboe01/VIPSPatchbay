@@ -5,8 +5,6 @@
  * Copyright 2025, All rights reserved.
  *
  * Todo:
- *       support required_format + display_name in blocks_catalogue
- *       change size for the imageviews in the collectionviews to the real image size on load (currently they are fixed 100x100px)
  *       support disabling / enabling of blocks via the context menu ("defaultMenu") (they are displayed grayed out in this case)
  *       support probe image windows (command in main menu). these windows can be connected to any block (control-dragging) and show the output image in realtime
  *       make inputController dependent on projectController

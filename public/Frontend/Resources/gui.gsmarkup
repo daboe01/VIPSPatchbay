@@ -7,7 +7,8 @@
             <vbox>
                 <scrollView hasHorizontalScroller="NO">
                     <tableView zebra="yes" valueBinding="#CPOwner.blocksCatalogueController" allowsMultipleSelection="YES" target="#CPOwner" doubleAction="performAddBlocks:">
-                        <tableColumn identifier="name" title="name" width="300" editable="NO"/>
+                        <tableColumn identifier="display_name" title="Operator" width="200" editable="NO"/>
+                        <tableColumn identifier="required_format" title="Required Format" width="100" editable="NO"/>
                     </tableView>
                 </scrollView>
                 <hbox>

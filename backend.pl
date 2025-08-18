@@ -345,6 +345,7 @@ helper get_result_of_block_id => sub {
 
     my $conn     = decode_json($block_info->{connections} || '{}');
     my $settings = decode_json($block_info->{output_value} || '{}');
+    $block_info->{parameter_mappings} = decode_json($block_info->{parameter_mappings} || '{}');
 
     # --- Handle special, non-command blocks first ---
     if ($block_info->{name} eq 'Input') {
@@ -401,17 +402,17 @@ helper get_result_of_block_id => sub {
         }
     }
     my $formatted_params = @param_values ? sprintf($param_template, @param_values) : '';
-
+warn $formatted_params;
     # 3b. Build the full command
     my $input_files_str = join ' ', map { $IMAGE_STORE_DIR->child($_)->to_string } @input_uuids;
     my $output_file = $IMAGE_STORE_DIR->child($output_uuid);
     my $command = sprintf(
-    $block_info->{command_template},
-    $block_info->{name},
-    $input_files_str,
-    $output_file,
-    );
-    $command =~ s/%s/$formatted_params/; # Substitute our formatted params block
+                            $block_info->{command_template},
+                            $block_info->{name},
+                            $input_files_str,
+                            $output_file,
+                            $formatted_params
+                          );
 
     # SECURITY NOTE: This construction assumes block names and parameters are sanitized
     # and not user-injectable in a way that allows shell metacharacters.

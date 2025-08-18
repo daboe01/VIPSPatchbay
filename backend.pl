@@ -336,6 +336,7 @@ helper get_result_of_block_id => sub {
                                                 bc.command_template,
                                                 bc.parameter_template,
                                                 bc.parameter_mappings,
+                                                bc.gui_fields,
                                                 b.connections,
                                                 b.output_value
                                                 FROM blocks b
@@ -358,13 +359,32 @@ helper get_result_of_block_id => sub {
         return $cache_dict->{$id} = $res->{uuid};
     }
 
-    # --- General Command Execution Logic ---
+    if ($block_info->{name} eq 'Image Preview') {
+        app->log->debug("Handling Image Preview block $id. Passing through input.");
+
+        # An Image Preview block should have exactly one input.
+        # We find its connected block ID.
+        my @input_keys = keys %$conn;
+        if (@input_keys != 1) {
+            app->log->error("Image Preview block $id has " . scalar(@input_keys) . " inputs, but expected 1.");
+            return undef;
+        }
+        my $input_block_id = $conn->{$input_keys[0]};
+
+        # Recursively get the result UUID from the connected block.
+        my $input_uuid = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
+
+        # The result of the preview is the result of its input.
+        return $cache_dict->{$id} = $input_uuid;
+    }
+
+    # --- General Command Execution Logic (unchanged from previous fix) ---
 
     # 1. Resolve inputs by recursively calling this helper
     my @input_uuids;
-    for my $key (sort keys %$conn) { # Sort for consistent cache key
+    for my $key (sort keys %$conn) {
         my $input_uuid = $self->get_result_of_block_id($conn->{$key}, $initial_input_uuid, $cache_dict);
-        return undef unless $input_uuid; # Propagate failure
+        return undef unless $input_uuid;
         push @input_uuids, $input_uuid;
     }
 
@@ -375,7 +395,7 @@ helper get_result_of_block_id => sub {
     my $cached = $self->pg->db->query(
                                         'SELECT uuid FROM image_cache WHERE idblock = ? AND parameters_json = ? AND input_uuids_json = ?',
                                         $id, $params_json, $inputs_json
-                                     )->hash;
+                                        )->hash;
 
     if ($cached) {
         app->log->debug("Cache HIT for block $id");
@@ -388,54 +408,55 @@ helper get_result_of_block_id => sub {
     my $ug = Data::UUID->new;
     my $output_uuid = $ug->create_str();
 
-    # 3a. Map parameters using 'parameter_mappings' if available
-    my @param_values;
-    my $param_template = $block_info->{parameter_template} || '';
-    my @param_keys = ($param_template =~ /%s/g) ? (sort keys %$settings) : ();
-
-    for my $key (@param_keys) {
+    # (Steps 3a, 3b, 3c for parameter building remain the same...)
+    my %mapped_settings;
+    for my $key (keys %$settings) {
         my $value = $settings->{$key};
-        if (exists $block_info->{parameter_mappings}->{$key}->{$value}) {
-            push @param_values, $block_info->{parameter_mappings}->{$key}->{$value};
-        } else {
-            push @param_values, $value;
-        }
+        $mapped_settings{$key} = $block_info->{parameter_mappings}->{$key}->{$value} // $value;
     }
-    my $formatted_params = @param_values ? sprintf($param_template, @param_values) : '';
-warn $formatted_params;
-    # 3b. Build the full command
-    my $input_files_str = join ' ', map { $IMAGE_STORE_DIR->child($_)->to_string } @input_uuids;
-    my $output_file = $IMAGE_STORE_DIR->child($output_uuid);
-    my $command = sprintf(
-                            $block_info->{command_template},
-                            $block_info->{name},
-                            $input_files_str,
-                            $output_file,
-                            $formatted_params
-                          );
+    my @positional_param_values;
+    my $param_template = $block_info->{parameter_template} || '';
+    my @optional_flag_names = ($param_template =~ /--(\S+)/g);
+    my %optional_keys_hash = map { my $k = $_; $k =~ s/-/_/g; ($k => 1) } @optional_flag_names;
+    my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
+    for my $key (@all_gui_fields) {
+        push @positional_param_values, $mapped_settings{$key} unless exists $optional_keys_hash{$key};
+    }
+    my @optional_param_values;
+    for my $flag_name (@optional_flag_names) {
+        my $key_name = $flag_name; $key_name =~ s/-/_/g;
+        push @optional_param_values, $mapped_settings{$key_name} if exists $mapped_settings{$key_name};
+    }
+    my $formatted_optionals = @optional_param_values ? sprintf($param_template, @optional_param_values) : '';
 
-    # SECURITY NOTE: This construction assumes block names and parameters are sanitized
-    # and not user-injectable in a way that allows shell metacharacters.
+    # 3d. Build and execute the command
+    my $input_files_str = join ' ', map { $IMAGE_STORE_DIR->child($_)->to_string } @input_uuids;
+    my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid);
+    my $temp_output_path  = $IMAGE_STORE_DIR->child($output_uuid . '.png');
+
+    my @command_parts = ('vips', $block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
+    my $command = join ' ', grep { defined && $_ ne '' } @command_parts;
+
     app->log->debug("Executing command: $command");
     my $output = `$command 2>&1`;
 
-    if ($? != 0 || !-e $output_file) {
+    if ($? != 0 || !-e $temp_output_path) {
         app->log->error("Command failed: $command");
         app->log->error("Output: $output");
         return undef;
     }
 
-    # 4. Store the new result in the cache
-    $self->pg->db->insert('image_cache', {
-                                                uuid             => $output_uuid,
-                                                idblock          => $id,
-                                                parameters_json  => $params_json,
-                                                input_uuids_json => $inputs_json
-                                         });
+    if (!rename($temp_output_path->to_string, $final_output_path->to_string)) {
+        app->log->error("Failed to rename temporary output file '$temp_output_path' to '$final_output_path': $!");
+        unlink $temp_output_path->to_string;
+        return undef;
+    }
+
+    # 4. Store result in cache
+    $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
 
     return $cache_dict->{$id} = $output_uuid;
 };
-
 ###################################################################
 # main()
 

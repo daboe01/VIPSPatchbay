@@ -297,7 +297,7 @@ BaseURL=HostURL+"/";
 - (id)blockForData:(id)o
 {
     var mydata = [CPConservativeDictionary new];
-    var title = [o valueForKeyPath:"block_type.name"];
+    var title = [o valueForKeyPath:"block_type.display_name"];
 
     var x    = parseInt([o valueForKey:'originX'], 10)
     var y    = parseInt([o valueForKey:'originY'], 10)

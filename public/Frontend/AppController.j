@@ -7,7 +7,6 @@
  * Todo:
  *       support required_format + display_name in blocks_catalogue
  *       change size for the imageviews in the collectionviews to the real image size on load (currently they are fixed 100x100px)
- *       flushGUI before running a pipeline
  *       support disabling / enabling of blocks via the context menu ("defaultMenu") (they are displayed grayed out in this case)
  *       support probe image windows (command in main menu). these windows can be connected to any block (control-dragging) and show the output image in realtime
  *       make inputController dependent on projectController
@@ -38,18 +37,43 @@ BaseURL=HostURL+"/";
     CPImageView _imageView;
 }
 
+- (void)imageDidFinishLoading:(CPImage)anImage
+{
+    var imageSize = [anImage size];
+    if (imageSize.width > 0 && imageSize.height > 0) {
+        [_imageView setFrameSize:imageSize];
+        // We might need to tell the collection view to re-layout its items
+        [[self collectionView] setNeedsLayout:YES];
+    }
+}
+
 - (CPView)loadView
 {
-    debugger
-    _imageView = [CPImageView new];
+    if (!_imageView) {
+        _imageView = [CPImageView new];
+        [_imageView setImageScaling:CPScaleToFit];
+    }
+    
     [self setView:_imageView];
 
     var dataObject = [self representedObject];
 
     if (dataObject)
-        [_imageView setImage:[[CPImage alloc] initWithContentsOfFile:"/VIPS/preview/" + [dataObject valueForKey:@"uuid"]]];
+    {
+        var imageURL = [dataObject valueForKey:@"url"];
+
+        if (!imageURL)
+            imageURL = "/VIPS/preview/" + [dataObject valueForKey:@"uuid"]; //+ "?w=100";
+
+        var image = [[CPImage alloc] initWithContentsOfFile:imageURL];
+        [image setDelegate:self];
+        [_imageView setImage:image];
+
+    }
     else
+    {
         [_imageView setImage:nil];
+    }
 
     return _imageView;
 }
@@ -204,7 +228,7 @@ BaseURL=HostURL+"/";
 {
     [self flushGUI];
 
-    var selectedImage = [inputImagesController selection];
+    var selectedImage = [inputController selection];
     var selectedProject = [projectsController selection];
 
     if (!selectedImage) {
@@ -217,8 +241,8 @@ BaseURL=HostURL+"/";
     }
 
     var payload =  @{
-                        idproject: [selectedProject valueForKey:"id"],
-                        input_uuid: [selectedImage valueForKey:'uuid']
+                        "idproject":  [selectedProject valueForKey:"id"],
+                        "input_uuid": [selectedImage valueForKey:'uuid']
                     };
 
     // This is the corrected request logic
@@ -265,10 +289,23 @@ BaseURL=HostURL+"/";
     [laceViewController performAddBlocks:sender]
 }
 
-- (void)reloadOutputImages
+- (void)reloadOutputImagesForProject:(id)aProject
 {
-    var myreq = [CPURLRequest requestWithURL:"/VIPS/output_images"];
+    if (!aProject) {
+        [outputController setContent:@[]];
+        return;
+    }
+
+    var projectID = [aProject valueForKey:@"id"];
+    var myreq = [CPURLRequest requestWithURL:"/VIPS/project/" + projectID + "/outputs"];
     outputImagesConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
+}
+
+- (void)observeValueForKeyPath:(CPString)keyPath ofObject:(id)object change:(CPDictionary)change context:(void)context
+{
+    if (object === projectsController && keyPath === @"selection") {
+        [self reloadOutputImagesForProject:[projectsController selection]];
+    }
 }
 
 - (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
@@ -278,24 +315,14 @@ BaseURL=HostURL+"/";
         if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
             [self resetButtonBusy:someConnection._senderButton];
 
-        var result = JSON.parse(data);
-
-        if (result && result['result']) {
-            // The result is a filename. We ask the backend to serve it.
-            var imagePath = result['result'];
-            // We need to extract just the filename part for the URL
-            var filename = imagePath.split('/').pop();
-            var imageURL = "/VIPS/preview/" + filename;
-            [imagePreviewView setImage:[[CPImage alloc] initWithContentsOfURL:imageURL]];
-        } else {
-            [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Image processing failed. Check backend logs." customIcon:TNGrowlIconError];
-        }
-
-        [self reloadOutputImages];
+        // After a successful run, just reload the outputs for the current project.
+        // The bindings will take care of updating the UI.
+        [self reloadOutputImagesForProject:[projectsController selection]];
     }
     else if (someConnection == outputImagesConnection)
     {
         var images = JSON.parse(data);
+        debugger
         [outputController setContent:images];
     }
 }
@@ -356,7 +383,7 @@ BaseURL=HostURL+"/";
     [laceViewController setEditWindow:editWindow];
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
 
-    [self reloadOutputImages];
+    [projectsController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
 }
 
 @end

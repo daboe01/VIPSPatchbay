@@ -9,10 +9,10 @@
 
         <arrayController id="projects_controller" entity="projects" autoFetchSync="YES" sortDescriptor="by_name"/>
         <arrayController id="input_controller" entity="input_images" autoFetchSync="YES" sortDescriptor="by_id"/>
+        <arrayController id="output_controller" entity="input_images" sortDescriptor="by_id"/>
         <arrayController id="blocks_controller" entity="blocks" valueBinding="projects_controller.selection.blocks" sortDescriptor="by_id"/>
         <arrayController id="settings_controller" entity="settings" valueBinding="blocks_controller.selection.settings"/>
         <arrayController id="blocks_catalogue_controller" entity="blocks_catalogue" autoFetchSync="YES" sortDescriptor="by_name"/>
-        <arrayController id="output_controller" sortDescriptor="by_id"/>
     </objects>
 
 <entities>
@@ -52,6 +52,9 @@
         <column name="id" primaryKey="YES"/>
         <column name="uuid"/>
         <column name="original_filename"/>
+    </entity>
+    <entity id="output_images" store="#CPOwner.store">
+        <column name="url"/>
     </entity>
 </entities>
 

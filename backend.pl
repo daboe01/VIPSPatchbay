@@ -154,6 +154,10 @@ get '/VIPS/output_images' => sub {
     }
     $self->render(json => \@images);
 };
+get '/VIPS/output_images/:input_uuid' => [input_uuid => qr/[0-9a-f\-]+/i] => sub {
+    my $self = shift;
+    $self->render(text => '');
+};
 
 post '/VIPS/run' => sub {
     my $self = shift;
@@ -172,6 +176,48 @@ post '/VIPS/run' => sub {
         $self->render(status => 500, json => { error => "Pipeline execution failed." });
     }
 };
+
+get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
+    my $self = shift;
+    my $projectid = $self->param('projectid');
+    my $input_uuid = $self->param('input_uuid');
+
+    my $block = $self->pg->db->query('select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null', $projectid)->hash;
+    unless ($block && $block->{id}) {
+        return $self->render(status => 404, json => { error => "Output block not found for project $projectid" });
+    }
+
+    my $result_uuid = $self->get_result_of_block_id($block->{id}, $input_uuid);
+
+    if ($result_uuid) {
+        my $image_file = $IMAGE_STORE_DIR->child($result_uuid);
+        if (-e $image_file) {
+            return $self->reply->file($image_file);
+        } else {
+            return $self->render(status => 404, text => 'Result image not found on disk.');
+        }
+    } else {
+        return $self->render(status => 500, json => { error => "Pipeline execution failed for input $input_uuid." });
+    }
+};
+
+get '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
+    my $self = shift;
+    my $projectid = $self->param('projectid');
+
+    my $input_images = $self->pg->db->query('SELECT uuid FROM input_images ORDER BY upload_timestamp DESC')->hashes;
+
+    my @outputs;
+    for my $image (@$input_images) {
+        push @outputs, {
+            url => "/VIPS/project/$projectid/image/" . $image->{uuid},
+            uuid => $image->{uuid}
+        };
+    }
+
+    $self->render(json => \@outputs);
+};
+
 
 #
 # begin: generic DBI interface (CRUD)

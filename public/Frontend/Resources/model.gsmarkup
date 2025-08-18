@@ -12,6 +12,7 @@
         <arrayController id="blocks_controller" entity="blocks" valueBinding="projects_controller.selection.blocks" sortDescriptor="by_id"/>
         <arrayController id="settings_controller" entity="settings" valueBinding="blocks_controller.selection.settings"/>
         <arrayController id="blocks_catalogue_controller" entity="blocks_catalogue" autoFetchSync="YES" sortDescriptor="by_name"/>
+        <arrayController id="output_controller" sortDescriptor="by_id"/>
     </objects>
 
 <entities>
@@ -60,6 +61,7 @@
     <outlet source="#CPOwner" target="blocks_catalogue_controller" label="blocksCatalogueController"/>
     <outlet source="#CPOwner" target="input_controller" label="inputController"/>
     <outlet source="#CPOwner" target="projects_controller" label="projectsController"/>
+    <outlet source="#CPOwner" target="output_controller" label="outputController"/>
 </connectors>
 
 

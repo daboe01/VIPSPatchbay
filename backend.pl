@@ -145,6 +145,16 @@ get '/VIPS/list_images' => sub {
     $self->render(json => $images);
 };
 
+get '/VIPS/output_images' => sub {
+    my $self = shift;
+    my @files = $IMAGE_STORE_DIR->list({dir => 0})->each;
+    my @images;
+    for my $file (@files) {
+        push @images, { uuid => $file->basename };
+    }
+    $self->render(json => \@images);
+};
+
 post '/VIPS/run' => sub {
     my $self = shift;
     my $json_body = $self->req->json;

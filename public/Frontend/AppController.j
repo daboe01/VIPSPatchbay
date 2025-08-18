@@ -4,13 +4,14 @@
  * Created by daboe01 on Aug, 2025 by Daniel Boehringer.
  * Copyright 2025, All rights reserved.
  *
- * Todo: support required_format + display_name in blocks_catalogue
- *       support globals size slider for displaying the input and output images in the collectionviews
-
- *       make inputController dependent on projectController
+ * Todo:
+ *       support required_format + display_name in blocks_catalogue
+ *       change size for the imageviews in the collectionviews to the real image size on load (currently they are fixed 100x100px)
+ *       flushGUI before running a pipeline
  *       support disabling / enabling of blocks via the context menu ("defaultMenu") (they are displayed grayed out in this case)
  *       support probe image windows (command in main menu). these windows can be connected to any block (control-dragging) and show the output image in realtime
- *       change size for the imageviews in the collectionviews to the real image size on load (currently they are fixed 100x100px)
+ *       make inputController dependent on projectController
+ *       support globals size slider for displaying the input and output images in the collectionviews
  *
  */
 
@@ -118,6 +119,7 @@ BaseURL=HostURL+"/";
     id  laceViewController;
     id  projectsController @accessors;
     id  inputController;
+    id  outputController @accessors;
     id  blocksCatalogueController @accessors;
     id  blocksController @accessors;
     id  settingsController @accessors;
@@ -126,6 +128,7 @@ BaseURL=HostURL+"/";
     id  addBlocksPopover;
     id  editPopover;
     id  runConnection;
+    id  outputImagesConnection;
     id  spinnerImg;
 
     // Upload properties
@@ -262,25 +265,39 @@ BaseURL=HostURL+"/";
     [laceViewController performAddBlocks:sender]
 }
 
+- (void)reloadOutputImages
+{
+    var myreq = [CPURLRequest requestWithURL:"/VIPS/output_images"];
+    outputImagesConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
+}
+
 - (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
 {
-    if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
-        [self resetButtonBusy:someConnection._senderButton];
+    if (someConnection == runConnection)
+    {
+        if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
+            [self resetButtonBusy:someConnection._senderButton];
 
-    var result = JSON.parse(data);
+        var result = JSON.parse(data);
 
-    if (result && result['result']) {
-        // The result is a filename. We ask the backend to serve it.
-        var imagePath = result['result'];
-        // We need to extract just the filename part for the URL
-        var filename = imagePath.split('/').pop();
-        var imageURL = "/VIPS/preview/" + filename;
-        [imagePreviewView setImage:[[CPImage alloc] initWithContentsOfURL:imageURL]];
-    } else {
-        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Image processing failed. Check backend logs." customIcon:TNGrowlIconError];
+        if (result && result['result']) {
+            // The result is a filename. We ask the backend to serve it.
+            var imagePath = result['result'];
+            // We need to extract just the filename part for the URL
+            var filename = imagePath.split('/').pop();
+            var imageURL = "/VIPS/preview/" + filename;
+            [imagePreviewView setImage:[[CPImage alloc] initWithContentsOfURL:imageURL]];
+        } else {
+            [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Error" message:"Image processing failed. Check backend logs." customIcon:TNGrowlIconError];
+        }
+
+        [self reloadOutputImages];
     }
-
-    [outputController reload];
+    else if (someConnection == outputImagesConnection)
+    {
+        var images = JSON.parse(data);
+        [outputController setContent:images];
+    }
 }
 
 - (void)showInspector:(id)sender
@@ -338,6 +355,8 @@ BaseURL=HostURL+"/";
     [laceViewController setSettingsController:settingsController];
     [laceViewController setEditWindow:editWindow];
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
+
+    [self reloadOutputImages];
 }
 
 @end

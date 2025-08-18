@@ -41,8 +41,8 @@
     id _panel;
     id _project;
     id _inspectorDataController;  // A single ArrayController for our one data object
-    id _combinedDataObject;        // The single, flat dictionary holding all parameters
-    id _allWidgetsView;           // The top-level view with all generated controls
+    id _combinedDataObject;       // The single, flat dictionary holding all parameters
+    id _stagingView;              // The top-level view with all generated controls
 }
 
 - (id)initWithProject:(id)aProject
@@ -97,16 +97,17 @@
     // Add the populated data object to its controller
     [_inspectorDataController addObject:_combinedDataObject];
 
-    // === Step 3: Assemble and parse the final GSMarkup document ===
-    var finalMarkup = '<?xml version="1.0"?> <!DOCTYPE gsmarkup> <gsmarkup> <objects> <vbox id="widgets">' + markupContent +
-    '</vbox> </objects> <connectors> <outlet source="#CPOwner" target="widgets" label="_allWidgetsView"/> </connectors></gsmarkup>';
+    // === Step 3: Create the staging view from the accumulated markup ===
+    // All widgets are loaded at once into a container view that is not yet attached to any window.
+    var finalMarkup = '<?xml version="1.0"?> <!DOCTYPE gsmarkup> <gsmarkup> <objects> <vbox halign="expand" width="350" id="widgets">' + markupContent +
+    '</vbox> </objects> <connectors> <outlet source="#CPOwner" target="widgets" label="_stagingView"/> </connectors></gsmarkup>';
 
     [CPBundle loadGSMarkupData:[CPData dataWithRawString:finalMarkup]
              externalNameTable:[CPDictionary dictionaryWithObject:self forKey:"CPOwner"]
        localizableStringsTable:nil inBundle:nil tagMapping:nil];
 
 
-    // === Step 4: Build the window, add a "Save" button, and place the view ===
+    // === Step 4: Build the inspector window and its chrome ===
     _panel = [[CPWindow alloc] initWithContentRect:CGRectMake(800, 50, 400, 700) styleMask:CPTitledWindowMask | CPClosableWindowMask | CPResizableWindowMask];
     [_panel setTitle:"Inspector for: " + [_project valueForKey:"name"]];
 
@@ -124,8 +125,14 @@
     [saveButton setAction:@selector(saveChanges:)];
     [mainVBox addSubview:saveButton];
 
-    if (_allWidgetsView) {
-        [scrollView setDocumentView:_allWidgetsView];
+    // === Step 5: Place the staging view into the scroll view ===
+    // Only now is the fully populated view added to the window's hierarchy.
+    if (_stagingView) {
+        var view = [[CPView alloc] initWithFrame:CGRectMake(0, 0, 400, [_stagingView frame].size.height)];
+        [view setAutoresizingMask:CPViewWidthSizable];
+        [view setAutoresizesSubviews:YES];
+        [view addSubview:_stagingView];
+        [scrollView setDocumentView:view];
     }
 
     return self;

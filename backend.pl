@@ -494,7 +494,17 @@ helper get_result_of_block_id => sub {
     my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid);
     my $temp_output_path  = $IMAGE_STORE_DIR->child($output_uuid . '.png');
 
-    my @command_parts = ('vips', $block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
+    my @command_parts;
+
+    if ($block_info->{name} =~/\//io)
+    {
+        @command_parts = ($block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
+    }
+    else
+    {
+        @command_parts = ('vips', $block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
+    }
+
     my $command = join ' ', grep { defined && $_ ne '' } @command_parts;
 
     app->log->debug("Executing command: $command");

@@ -324,9 +324,15 @@ BaseURL=HostURL+"/";
     }
     else if (someConnection == outputImagesConnection)
     {
-        var images = JSON.parse(data);
-        debugger
-        [outputController setContent:images];
+        var imagesIn = JSON.parse(data);
+        var imagesOut = [CPArray new];
+
+        for(var i = 0; i < imagesIn.length; i++)
+        {
+            imagesOut.push([CPDictionary dictionaryWithObjects:[i, imagesIn[i]['url']] forKeys:["id", "url"]]);
+        }
+
+        [outputController setContent:imagesOut];
     }
 }
 

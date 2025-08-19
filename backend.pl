@@ -13,7 +13,7 @@ use Mojo::Template;
 use Text::CSV;
 use Statistics::R;
 use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
-use File::Basename;
+use File::Basename 'fileparse'; # Import fileparse directly
 use Data::UUID;
 use Cwd 'abs_path';
 use Fcntl qw(:flock); # For file locking to prevent race conditions
@@ -40,13 +40,19 @@ post '/VIPS/upload' => sub {
 
     for my $upload (@$uploads) {
         my $original_filename = $upload->filename;
-        my $uuid_str          = $ug->create_str();
-        my $destination_path  = $IMAGE_STORE_DIR->child($uuid_str);
+        # Extract the extension to preserve it
+        my ($name, $path, $ext) = fileparse($original_filename, qr/\.[^.]*/);
+        $ext //= ''; # Handle files with no extension gracefully
 
-        # Store file on disk with UUID as name
+        my $uuid_str          = $ug->create_str();
+        # New filename is uuid + original extension
+        my $destination_filename = $uuid_str . $ext;
+        my $destination_path  = $IMAGE_STORE_DIR->child($destination_filename);
+
+        # Store file on disk with UUID.ext as name
         $upload->move_to($destination_path);
 
-        # Record in the database
+        # Record in the database with the base UUID
         $self->pg->db->insert('input_images', {
             uuid              => $uuid_str,
             original_filename => $original_filename
@@ -58,6 +64,21 @@ post '/VIPS/upload' => sub {
 
 # --- (in backend.pl) ---
 
+# New helper to find an image path by its base UUID, regardless of extension
+helper find_image_path_by_uuid => sub {
+    my ($self, $uuid) = @_;
+    # Basic validation to ensure we're looking for a UUID-like string
+    return undef unless $uuid && $uuid =~ /^[0-9a-f\-]{36}$/i;
+
+    # Use Mojo::File's list which is safer and more portable than glob.
+    # It finds the first file that starts with "uuid."
+    my $found_file = $IMAGE_STORE_DIR->list({dir => 0})->first(sub {
+        $_->basename =~ /^\Q$uuid\E(\.|$)/
+    });
+
+    return $found_file;
+};
+
 
 # REPLACEMENT for the /VIPS/preview/:uuid route
 get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
@@ -65,10 +86,11 @@ get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     my $uuid = $self->param('uuid');
     my $width = $self->param('w');
 
-    my $source_file = $IMAGE_STORE_DIR->child($uuid);
+    # Find the source file by its base UUID, regardless of extension
+    my $source_file = $self->find_image_path_by_uuid($uuid);
 
-    # Security check and existence check for the source file
-    unless (abs_path($source_file) =~ /^\Q$IMAGE_STORE_DIR\E/ && -e $source_file) {
+    # Security check is implicitly handled by the helper, just check for existence
+    unless ($source_file && -e $source_file) {
         return $self->render(status => 404, text => 'Not Found');
     }
 
@@ -132,7 +154,7 @@ get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     }
 
     # Finally, serve the newly created thumbnail
-    return self->reply->file($thumbnail_path);
+    return $self->reply->file($thumbnail_path);
 };
 
 get '/VIPS/list_images' => sub {
@@ -150,10 +172,13 @@ get '/VIPS/output_images' => sub {
     my @files = $IMAGE_STORE_DIR->list({dir => 0})->each;
     my @images;
     for my $file (@files) {
-        push @images, { uuid => $file->basename };
+        # Parse basename to extract the UUID part without the extension
+        my ($uuid_part) = fileparse($file->basename, qr/\.[^.]*/);
+        push @images, { uuid => $uuid_part };
     }
     $self->render(json => \@images);
 };
+
 get '/VIPS/output_images/:input_uuid' => [input_uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     $self->render(text => '');
@@ -195,46 +220,34 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
         return $self->render(status => 500, json => { error => "Pipeline execution failed for input $input_uuid." });
     }
 
-    my $image_file = $IMAGE_STORE_DIR->child($result_uuid);
+    my $image_file = $self->find_image_path_by_uuid($result_uuid);
 
-    unless (-e $image_file) {
-        $self->app->log->error("Processing finished, but result file not found: $image_file");
+    unless ($image_file && -e $image_file) {
+        $self->app->log->error("Processing finished, but result file not found for UUID: $result_uuid");
         return $self->render(status => 404, text => 'Result image not found on disk.');
     }
 
     # 1. Create a temporary file object.
-    #    It will be automatically deleted when this sub returns, which is perfect.
-    my $temp = File::Temp->new(
-    SUFFIX => '.png',
-    UNLINK => 1
-    );
+    my $temp = File::Temp->new( SUFFIX => '.png', UNLINK => 1 );
     my $temp_filename = $temp->filename;
 
     # 2. Build the command to write to the temporary file.
-    #    We no longer need to capture output, just check the exit status.
-    my @cmd = (
-                    'vips',
-                    'pngsave',
-                    $image_file->to_string,
-                    $temp_filename
-                );
+    my @cmd = ('vips', 'pngsave', $image_file->to_string, $temp_filename);
 
-    # 3. Execute the command. The 'system' call is perfect for this.
-    #    We'll capture any error output for logging.
+    # 3. Execute the command.
     my $error_output = `@cmd 2>&1`;
 
-    # 4. Check the exit status. If it failed, log the error and return.
+    # 4. Check the exit status.
     if ($? != 0) {
         $self->app->log->error("Failed to convert final image to PNG. VIPS said: $error_output");
         return $self->render(status => 500, text => "Failed to generate preview image.");
     }
 
-    # 5. The command succeeded. Read the binary data from the temp file.
+    # 5. Read the binary data from the temp file.
     open(my $fh, '<:raw', $temp_filename) or do {
         $self->app->log->error("Could not open temp file '$temp_filename' for reading: $!");
         return $self->render(status => 500, text => "Server error reading temporary image.");
     };
-
     my $png_data;
     {
         local $/ = undef; # Slurp mode
@@ -242,11 +255,8 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
     }
     close $fh;
 
-    # The $temp object will now go out of scope, and File::Temp will delete the file.
-
     # 6. Send the image data to the browser.
     $self->res->headers->content_type('image/png');
-
     return $self->render(data => $png_data);
 };
 
@@ -382,7 +392,7 @@ helper get_result_of_block_id => sub {
     my $block_info = $self->pg->db->query(q{
                                                 SELECT
                                                 bc.name,
-                                                bc.command_template,
+                                                bc.command,
                                                 bc.parameter_template,
                                                 bc.parameter_mappings,
                                                 bc.gui_fields,
@@ -410,24 +420,17 @@ helper get_result_of_block_id => sub {
 
     if ($block_info->{name} eq 'Image Preview') {
         app->log->debug("Handling Image Preview block $id. Passing through input.");
-
-        # An Image Preview block should have exactly one input.
-        # We find its connected block ID.
         my @input_keys = keys %$conn;
         if (@input_keys != 1) {
             app->log->error("Image Preview block $id has " . scalar(@input_keys) . " inputs, but expected 1.");
             return undef;
         }
         my $input_block_id = $conn->{$input_keys[0]};
-
-        # Recursively get the result UUID from the connected block.
         my $input_uuid = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
-
-        # The result of the preview is the result of its input.
         return $cache_dict->{$id} = $input_uuid;
     }
 
-    # --- General Command Execution Logic (unchanged from previous fix) ---
+    # --- General Command Execution Logic ---
 
     # 1. Resolve inputs by recursively calling this helper
     my @input_uuids;
@@ -448,16 +451,17 @@ helper get_result_of_block_id => sub {
 
     if ($cached) {
         my $cached_uuid = $cached->{uuid};
-        my $cached_file = $IMAGE_STORE_DIR->child($cached_uuid);
+        # Find the cached file on disk using the helper
+        my $cached_file = $self->find_image_path_by_uuid($cached_uuid);
 
         # VERIFY that the cached file actually exists on disk.
-        if (-e $cached_file) {
+        if ($cached_file && -e $cached_file) {
             app->log->debug("Cache HIT for block $id (file verified)");
             return $cache_dict->{$id} = $cached_uuid;
         }
         else {
             # The cache is stale. The file is missing.
-            app->log->warn("STALE CACHE: Hit for block $id, but file '$cached_file' is missing. Deleting entry and reprocessing.");
+            app->log->warn("STALE CACHE: Hit for block $id, but file for UUID '$cached_uuid' is missing. Deleting entry and reprocessing.");
             # Delete the orphaned entry to self-heal the cache.
             $self->pg->db->query('DELETE FROM image_cache WHERE uuid = ?', $cached_uuid);
         }
@@ -468,7 +472,7 @@ helper get_result_of_block_id => sub {
     my $ug = Data::UUID->new;
     my $output_uuid = $ug->create_str();
 
-    # (Steps 3a, 3b, 3c for parameter building remain the same...)
+    # 3a. Build parameter lists
     my %mapped_settings;
     for my $key (keys %$settings) {
         my $value = $settings->{$key};
@@ -489,36 +493,36 @@ helper get_result_of_block_id => sub {
     }
     my $formatted_optionals = @optional_param_values ? sprintf($param_template, @optional_param_values) : '';
 
-    # 3d. Build and execute the command
-    my $input_files_str = join ' ', map { $IMAGE_STORE_DIR->child($_)->to_string } @input_uuids;
-    my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid);
-    my $temp_output_path  = $IMAGE_STORE_DIR->child($output_uuid . '.png');
-
-    my @command_parts;
-
-    if ($block_info->{name} =~/\//io)
-    {
-        @command_parts = ($block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
+    # 3b. Resolve input UUIDs to full file paths
+    my @input_file_paths;
+    for my $input_uuid (@input_uuids) {
+        my $input_file = $self->find_image_path_by_uuid($input_uuid);
+        unless ($input_file && -e $input_file) {
+            app->log->error("Processing error: Input file for UUID $input_uuid not found for block $id");
+            return undef;
+        }
+        push @input_file_paths, $input_file->to_string;
     }
-    else
-    {
-        @command_parts = ('vips', $block_info->{name}, $input_files_str, $temp_output_path, @positional_param_values, $formatted_optionals);
-    }
+    my $input_files_str = join ' ', @input_file_paths;
 
+    # 3c. Define output path. All generated images will be PNGs.
+    my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid . '.png');
+
+    # 3d. Build and execute the command. Per request, we write directly to the final path.
+    # NOTE: This is less safe than writing to a temp file and renaming, as an interruption
+    # could leave a corrupt file at the final destination.
+
+    my @command_parts = ($block_info->{command}, $block_info->{name}, $input_files_str, $final_output_path, @positional_param_values, $formatted_optionals);
     my $command = join ' ', grep { defined && $_ ne '' } @command_parts;
 
     app->log->debug("Executing command: $command");
     my $output = `$command 2>&1`;
 
-    if ($? != 0 || !-e $temp_output_path) {
+    # Check for success by looking for the final file.
+    if ($? != 0 || !-e $final_output_path) {
         app->log->error("Command failed: $command");
         app->log->error("Output: $output");
-        return undef;
-    }
-
-    if (!rename($temp_output_path->to_string, $final_output_path->to_string)) {
-        app->log->error("Failed to rename temporary output file '$temp_output_path' to '$final_output_path': $!");
-        unlink $temp_output_path->to_string;
+        unlink $final_output_path->to_string if -e $final_output_path; # Clean up partial file
         return undef;
     }
 

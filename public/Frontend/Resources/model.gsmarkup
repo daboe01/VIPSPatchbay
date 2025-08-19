@@ -24,6 +24,7 @@
     <entity id="blocks_catalogue" store="#CPOwner.store">
         <column name="id" primaryKey="YES"/>
         <column name="type"/>
+        <column name="command"/>
         <column name="name"/>
         <column name="display_name"/>
         <column name="inputs"/>

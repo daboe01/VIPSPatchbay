@@ -108,7 +108,7 @@
 
 
     // === Step 4: Build the inspector window and its chrome ===
-    _panel = [[CPWindow alloc] initWithContentRect:CGRectMake(800, 50, 400, 700) styleMask:CPTitledWindowMask | CPClosableWindowMask | CPResizableWindowMask];
+    _panel = [[CPWindow alloc] initWithContentRect:CGRectMake(200, 50, 400, 700) styleMask:CPTitledWindowMask | CPClosableWindowMask | CPResizableWindowMask];
     [_panel setTitle:"Inspector for: " + [_project valueForKey:"name"]];
 
     var mainVBox = [[CPView alloc] initWithFrame:[[_panel contentView] bounds]];
@@ -119,10 +119,10 @@
     [scrollView setAutoresizingMask:CPViewWidthSizable | CPViewHeightSizable];
     [mainVBox addSubview:scrollView];
 
-    var saveButton = [[CPButton alloc] initWithFrame:CGRectMake(10, 5, 80, 24)];
-    [saveButton setTitle:"Save"];
+    var saveButton = [[CPButton alloc] initWithFrame:CGRectMake(10, 5, 120, 24)];
+    [saveButton setTitle:"Save & Apply"];
     [saveButton setTarget:self];
-    [saveButton setAction:@selector(saveChanges:)];
+    [saveButton setAction:@selector(saveAndApplyChanges:)];
     [mainVBox addSubview:saveButton];
 
     // === Step 5: Place the staging view into the scroll view ===
@@ -138,7 +138,7 @@
     return self;
 }
 
-- (void)saveChanges:(id)sender
+- (void)saveAndApplyChanges:(id)sender
 {
     // This method deconstructs the flat dictionary and applies the changes
     // back to the individual block objects.
@@ -185,8 +185,9 @@
         }
     }
 
-    [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved."];
-    // fixme: rerun the project to apply changes
+    // [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved."];
+    // rerun to give user feedback
+    [CPApp._delegate run:nil];
 }
 
 - (void)showWindow:(id)sender

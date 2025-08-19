@@ -268,8 +268,13 @@ BaseURL=HostURL+"/";
         [myreq setValue:"application/json" forHTTPHeaderField:"Content-Type"];
 
         runConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
-        [self setButtonBusy:sender];
-        runConnection._senderButton = sender;
+
+        if (sender)
+        {
+            [self setButtonBusy:sender];
+            runConnection._senderButton = sender;
+        }
+
     }, 250);
 }
 
@@ -406,6 +411,8 @@ BaseURL=HostURL+"/";
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
 
     [projectsController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
+    [self setThumbnailSize:100];
+    [self reloadOutputImages:self];
 }
 
 @end

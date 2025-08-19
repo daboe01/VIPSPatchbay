@@ -29,21 +29,7 @@
 
         <window bridge="YES" id="mainwindow" delegate="#CPOwner">
             <vbox>
-                <splitView vertical="YES" autosaveName="vsplitter_main_vips_top1">
-                    <vbox width="250">
-                        <hbox>
-                            <label title="Input Images"/>
-                            <hspace/>
-                            <button title="⟳" target="#CPOwner" action="reloadInputImages:"/>
-                        </hbox>
-                        <scrollView>
-                            <collectionView id="input_collection_view" valueBinding="#CPOwner.inputController.arrangedObjects"
-                                            itemWidth="100" itemHeight="100"
-                                            itemsClassName="SimpleImageViewCollectionItem"
-                                            selectable="YES" allowsMultipleSelection="NO"/>
-                        </scrollView>
-                    </vbox>
-
+                <splitView vertical="YES" autosaveName="vsplitter_main_vips_top2">
                     <vbox height="150">
                         <label title="Pipelines"/>
                         <scrollView hasHorizontalScroller="YES">
@@ -64,26 +50,51 @@
                             <hspace/>
                             <button title="Run Pipeline" target="#CPOwner" action="run:"/>
                             <hspace/>
-                            <label title="Thumbnail Size"/>
-                            <slider target="#CPOwner" action="setThumbnailSize:" min="100" max="1000" value="100"/>
                         </hbox>
                         <scrollView>
                             <patchbayView id="lace_view" width="2000" height="2000" halign="min" valign="min"/>
                         </scrollView>
                     </vbox>
 
-                    <vbox width="250">
+                    <vbox>
+                        <tabView type="topBezel" delegate="#CPOwner">
+                            <tabViewItem title="Input Images">
+                                <vbox>
+                                    <hbox>
+                                        <hspace/>
+                                        <button title="⟳" target="#CPOwner" action="reloadInputImages:"/>
+                                    </hbox>
+                                    <scrollView>
+                                        <collectionView id="input_collection_view" valueBinding="#CPOwner.inputController.arrangedObjects"
+                                        itemWidth="100" itemHeight="100"
+                                        itemsClassName="SimpleImageViewCollectionItem"
+                                        selectable="YES" allowsMultipleSelection="NO"/>
+                                    </scrollView>
+                                </vbox>
+                            </tabViewItem>
+
+                            <tabViewItem title="Output Images">
+
+                                <vbox>
+                                    <hbox>
+                                        <hspace/>
+                                        <button title="⟳" target="#CPOwner" action="reloadOutputImages:"/>
+                                    </hbox>
+                                    <scrollView>
+                                        <collectionView id="output_collection_view" valueBinding="#CPOwner.outputController.arrangedObjects"
+                                        itemWidth="100" itemHeight="100"
+                                        itemsClassName="SimpleImageViewCollectionItem"
+                                        selectable="YES" allowsMultipleSelection="NO"/>
+                                    </scrollView>
+                                </vbox>
+                            </tabViewItem>
+                        </tabView>
                         <hbox>
-                            <label title="Output Images"/>
+                            <label title="Thumbnail Size"/>
+                            <slider target="#CPOwner" action="setThumbnailSize:" min="100" max="1000" value="100"/>
                             <hspace/>
-                            <button title="⟳" target="#CPOwner" action="reloadOutputImages:"/>
                         </hbox>
-                        <scrollView>
-                            <collectionView id="output_collection_view" valueBinding="#CPOwner.outputController.arrangedObjects"
-                                            itemWidth="100" itemHeight="100"
-                                            itemsClassName="SimpleImageViewCollectionItem"
-                                            selectable="YES" allowsMultipleSelection="NO"/>
-                        </scrollView>
+
                     </vbox>
                 </splitView>
             </vbox>
@@ -99,3 +110,5 @@
         <outlet source="CPOwner" target="output_collection_view" label="outputCollectionView"/>
     </connectors>
 </gsmarkup>
+
+

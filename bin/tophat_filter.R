@@ -8,8 +8,8 @@ suppressPackageStartupMessages(library(optparse))
 option_list <- list(
     make_option(c("-c", "--color"), type="character", default="White",
                 help="Type of top-hat filter: 'White' or 'Black' [default: %default]"),
-    make_option(c("-b", "--brush"), type="character", default="disk",
-                help="Shape of the brush: 'disk', 'line', 'diamond', or 'box' [default: %default]"),
+    make_option(c("-b", "--brush"), type="character", default="disc",
+                help="Shape of the brush: 'disc', 'line', 'diamond', or 'box' [default: %default]"),
     make_option(c("-s", "--size"), type="integer", default=5,
                 help="Size of the brush (an odd integer is recommended) [default: %default]")
 )
@@ -44,7 +44,7 @@ if (!tolower(options$color) %in% valid_colors) {
 }
 
 # Validate brush shape argument
-valid_brushes <- c("disk", "line", "diamond", "box")
+valid_brushes <- c("disc", "line", "diamond", "box", "gaussian")
 if (!tolower(options$brush) %in% valid_brushes) {
     stop(paste("Invalid brush shape. Choose from:", paste(valid_brushes, collapse=", ")), call.=FALSE)
 }
@@ -54,6 +54,8 @@ if (!tolower(options$brush) %in% valid_brushes) {
 cat("Reading image:", infile, "\n")
 tryCatch({
     img <- readImage(infile)
+    colorMode(img)="Grayscale"
+    img=img[,,1]
 }, error = function(e) {
     stop(paste("Failed to read the input image. Is it a valid image format (PNG, JPEG, TIFF)?\nError:", e$message), call.=FALSE)
 })

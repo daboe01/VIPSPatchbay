@@ -62,6 +62,10 @@
     var blocks = [_project valueForKey:@"blocks"];
     var settingsBlocks = [blocks filteredArrayUsingPredicate:[CPPredicate predicateWithFormat:@"block_type.gui_xml != NULL AND block_type.gui_xml != ''"]];
 
+    // Sort the blocks by their ID to ensure a stable order
+    var sortDescriptor = [CPSortDescriptor sortDescriptorWithKey:@"id" ascending:YES];
+    settingsBlocks = [settingsBlocks sortedArrayUsingDescriptors:[sortDescriptor]];
+
     // === Step 2: Populate the flat data dictionary and build the master XML string ===
     var markupContent = '';
 

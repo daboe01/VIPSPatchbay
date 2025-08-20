@@ -56,7 +56,7 @@ BaseURL=HostURL+"/";
     [self setView:_imageView];
 
     var dataObject = [self representedObject];
-debugger
+
     if (dataObject)
     {
         var imageURL = [dataObject valueForKey:@"url"];

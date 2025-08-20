@@ -25,8 +25,9 @@ BaseURL=HostURL+"/";
 @import <Renaissance/Renaissance.j>
 @import "TNGrowlCenter.j";
 @import "TNGrowlView.j";
-@import "LaceViewController.j";
-@import "InspectorController.j";
+@import "LaceViewController.j"
+@import "InspectorController.j"
+@import "ProbeWindowController.j"
 
 @import <Cup/Cup.j>
 
@@ -159,6 +160,8 @@ BaseURL=HostURL+"/";
     id myCuploader;
     id queueController;
     id inspectorController;
+    id _probeControllers;
+    id selectedInputUUID @accessors;
 }
 
 - (void)setThumbnailSize:(id)sender
@@ -327,6 +330,11 @@ BaseURL=HostURL+"/";
     if (object === projectsController && keyPath === @"selection") {
         [self reloadOutputImagesForProject:[projectsController selection]];
     }
+    else if (object === inputController && keyPath === @"selection") {
+        [self setSelectedInputUUID:[[inputController selection] valueForKey:@"uuid"]];
+        for (var i = 0; i < [_probeControllers count]; i++)
+            [[_probeControllers objectAtIndex:i] updateImage];
+    }
 }
 
 - (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
@@ -370,6 +378,16 @@ BaseURL=HostURL+"/";
     [_inspectorController showWindow:sender];
 }
 
+- (void)addProbeController:(id)aController
+{
+    [_probeControllers addObject:aController];
+}
+
+- (void)removeProbeController:(id)aController
+{
+    [_probeControllers removeObject:aController];
+}
+
 - (void)cup:(Cup)aCup uploadDidCompleteForFile:(CupFile)aFile
 {
     // remove from list
@@ -383,6 +401,8 @@ BaseURL=HostURL+"/";
 
 - (void)applicationDidFinishLaunching:(CPNotification)aNotification
 {
+    _probeControllers = [CPMutableArray new];
+
     // Point the store to the new /VIPS endpoint
     store = [[SessionStore alloc] initWithBaseURL:HostURL+"/VIPS"];
 
@@ -411,6 +431,7 @@ BaseURL=HostURL+"/";
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
 
     [projectsController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
+    [inputController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
     [self setThumbnailSize:100];
     [self reloadOutputImages:self];
 }

@@ -592,6 +592,31 @@ var _inoutputObservationContext = 1094;
         [[self superview]._delegate laceView:[self superview] showTooltipForHole:startHole || endHole];
 }
 
++ (CPMenu)defaultMenu
+{
+    var menu = [[CPMenu alloc] initWithTitle:@"Contextual Menu"],
+        deleteMenuItem = [[CPMenuItem alloc] initWithTitle:@"Delete" action:@selector(delete:) keyEquivalent:@""],
+        addProbeMenuItem = [[CPMenuItem alloc] initWithTitle:@"Add Probe" action:@selector(addProbe:) keyEquivalent:@""];
+
+    [menu addItem:addProbeMenuItem];
+    [menu addItem:deleteMenuItem];
+
+    return menu;
+}
+
+- (void)addProbe:(id)sender
+{
+    var inputUUID = [[CPApp delegate] selectedInputUUID];
+    var controller = [[ProbeWindowController alloc] initWithBlock:[self data] andInputUUID:inputUUID];
+    [controller showWindow:self];
+    [[CPApp delegate] addProbeController:controller];
+}
+
+- (void)delete:(id)sender
+{
+    [[[self superview] delegate] removeBlock:[self data]];
+}
+
 - (void)mouseDown:(CPEvent)theEvent
 {
 

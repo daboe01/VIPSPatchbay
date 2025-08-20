@@ -202,6 +202,23 @@ post '/VIPS/run' => sub {
     }
 };
 
+get '/VIPS/block/:block_id/image/:input_uuid' => [block_id => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
+    my $self = shift;
+    my $block_id = $self->param('block_id');
+    my $input_uuid = $self->param('input_uuid');
+
+    my $result_uuid = $self->get_result_of_block_id($block_id, $input_uuid);
+
+    if ($result_uuid) {
+        my $image_file = $self->find_image_path_by_uuid($result_uuid);
+        if ($image_file && -e $image_file) {
+            return $self->reply->file($image_file);
+        }
+    }
+
+    return $self->render(status => 404, text => 'Image not found');
+};
+
 get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     my $projectid = $self->param('projectid');
@@ -382,7 +399,6 @@ del '/VIPS/:table/:pk/:key' => [key=>qr/\d+/] => sub
 # end: generic DBI interface
 #
 
-
 helper get_result_of_block_id => sub {
     my ($self, $id, $initial_input_uuid, $cache_dict) = @_;
     $cache_dict //= {}; # Memoization for recursive calls within a single run
@@ -503,7 +519,6 @@ helper get_result_of_block_id => sub {
         }
         push @input_file_paths, $input_file->to_string;
     }
-    my $input_files_str = join ' ', @input_file_paths;
 
     # 3c. Define output path. All generated images will be PNGs.
     my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid . '.png');
@@ -512,7 +527,9 @@ helper get_result_of_block_id => sub {
     # NOTE: This is less safe than writing to a temp file and renaming, as an interruption
     # could leave a corrupt file at the final destination.
 
-    my @command_parts = ($block_info->{command}, $block_info->{name}, $input_files_str, $final_output_path, @positional_param_values, $formatted_optionals);
+    # The array of @input_file_paths is placed directly into the command parts.
+    # This ensures that each input file is treated as a separate argument.
+    my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path, @positional_param_values, $formatted_optionals);
     my $command = join ' ', grep { defined && $_ ne '' } @command_parts;
 
     app->log->debug("Executing command: $command");
@@ -531,6 +548,7 @@ helper get_result_of_block_id => sub {
 
     return $cache_dict->{$id} = $output_uuid;
 };
+
 ###################################################################
 # main()
 

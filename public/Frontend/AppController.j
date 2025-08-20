@@ -56,7 +56,7 @@ BaseURL=HostURL+"/";
     [self setView:_imageView];
 
     var dataObject = [self representedObject];
-
+debugger
     if (dataObject)
     {
         var imageURL = [dataObject valueForKey:@"url"];
@@ -316,7 +316,21 @@ BaseURL=HostURL+"/";
     }
 
     var projectID = [aProject valueForKey:@"id"];
+    var allInputs = [inputController arrangedObjects];
+    var inputUUIDs = [allInputs valueForKey:@"uuid"];
+
+    if (!inputUUIDs || [inputUUIDs count] === 0) {
+        [outputController setContent:@[]];
+        return;
+    }
+
+    var payload = @{"input_uuids": inputUUIDs};
+
     var myreq = [CPURLRequest requestWithURL:"/VIPS/project/" + projectID + "/outputs"];
+    [myreq setHTTPMethod:"POST"];
+    [myreq setHTTPBody:[payload toJSON]];
+    [myreq setValue:"application/json" forHTTPHeaderField:"Content-Type"];
+
     outputImagesConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
 }
 
@@ -337,20 +351,20 @@ BaseURL=HostURL+"/";
     }
 }
 
-- (void)connection:(CPConnection)someConnection didReceiveData:(CPData)data
+- (void)connection:(CPConnection)aConnection didReceiveData:(CPData)aData
 {
-    if (someConnection == runConnection)
+    if (aConnection == runConnection)
     {
-        if (someConnection._senderButton && [someConnection._senderButton isKindOfClass:CPButton])
-            [self resetButtonBusy:someConnection._senderButton];
+        if (aConnection._senderButton && [aConnection._senderButton isKindOfClass:CPButton])
+            [self resetButtonBusy:aConnection._senderButton];
 
         // After a successful run, just reload the outputs for the current project.
         // The bindings will take care of updating the UI.
         [self reloadOutputImagesForProject:[projectsController selection]];
     }
-    else if (someConnection == outputImagesConnection)
+    else if (aConnection == outputImagesConnection)
     {
-        var imagesIn = JSON.parse(data);
+        var imagesIn = JSON.parse(aData);
         var imagesOut = [CPArray new];
 
         for(var i = 0; i < imagesIn.length; i++)

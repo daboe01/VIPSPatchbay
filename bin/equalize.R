@@ -25,6 +25,10 @@ if (!file.exists(infile)) {
 cat("Reading image:", infile, "\n")
 tryCatch({
     img <- readImage(infile)
+    if (length(dim(img)) == 3) {
+  		img <- img[,,1]
+}
+
 }, error = function(e) {
     stop(paste("Failed to read the input image. Is it a valid image format (PNG, JPEG, TIFF)?\nError:", e$message), call.=FALSE)
 })

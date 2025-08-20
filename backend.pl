@@ -277,20 +277,54 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
     return $self->render(data => $png_data);
 };
 
-get '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
+post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
     my $self = shift;
     my $projectid = $self->param('projectid');
+    my $json_body = $self->req->json;
 
-    my $input_images = $self->pg->db->query('SELECT uuid FROM input_images ORDER BY upload_timestamp DESC')->hashes;
+    # Expect a JSON array of input UUIDs, e.g., { "input_uuids": ["uuid1", "uuid2", ...] }
+    my $input_uuids = $json_body->{input_uuids};
 
-    my @outputs;
-    for my $image (@$input_images) {
-        push @outputs, {
-            url => "/VIPS/project/$projectid/image/" . $image->{uuid},
-            uuid => $image->{uuid}
-        };
+    unless ($input_uuids && ref $input_uuids eq 'ARRAY') {
+        return $self->render(status => 400, json => { error => "Missing or invalid 'input_uuids' array in request body." });
     }
 
+    # Find the final output block for the given project
+    my $output_block = $self->pg->db->query(
+        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+        $projectid
+    )->hash;
+
+    unless ($output_block && $output_block->{id}) {
+        return $self->render(status => 404, json => { error => "Final output block not found for project $projectid" });
+    }
+    my $output_block_id = $output_block->{id};
+
+    my @outputs;
+    my %cache_dict; # Memoization cache for the duration of this request
+
+    for my $input_uuid (@$input_uuids) {
+        # Use the existing helper to trace the pipeline for each input UUID
+        my $result_uuid = $self->get_result_of_block_id($output_block_id, $input_uuid, \%cache_dict);
+
+        if ($result_uuid) {
+            push @outputs, {
+                input_uuid => $input_uuid,
+                output_uuid => $result_uuid,
+                url => "/VIPS/preview/$result_uuid" # Use the standard preview route
+            };
+        } else {
+            # If a pipeline fails for one UUID, note it and continue
+            push @outputs, {
+                input_uuid => $input_uuid,
+                output_uuid => undef,
+                error => "Pipeline execution failed for this input."
+            };
+            $self->app->log->error("Could not generate output for project $projectid with input $input_uuid");
+        }
+    }
+
+    # The response is now an array of objects, preserving the order of the input_uuids
     $self->render(json => \@outputs);
 };
 

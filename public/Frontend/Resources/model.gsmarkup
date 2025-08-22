@@ -43,6 +43,7 @@
         <column name="output_value"/>
         <column name="originX"/>
         <column name="originY"/>
+        <column name="enabled"/>
         <relationship type="toOne" name="block_type" bindingColumn="idblock" target="blocks_catalogue"/>
         <relationship type="toOne" name="settings" bindingColumn="id" target="settings"/>
     </entity>

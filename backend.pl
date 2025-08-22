@@ -17,6 +17,7 @@ use File::Basename 'fileparse'; # Import fileparse directly
 use Data::UUID;
 use Cwd 'abs_path';
 use Fcntl qw(:flock); # For file locking to prevent race conditions
+use Text::ParseWords qw(shellwords);
 
 no warnings 'uninitialized';
 
@@ -447,7 +448,8 @@ helper get_result_of_block_id => sub {
                                                 bc.parameter_mappings,
                                                 bc.gui_fields,
                                                 b.connections,
-                                                b.output_value
+                                                b.output_value,
+                                                b.enabled
                                                 FROM blocks b
                                                 JOIN blocks_catalogue bc ON b.idblock = bc.id
                                                 WHERE b.id = ?
@@ -456,6 +458,19 @@ helper get_result_of_block_id => sub {
     my $conn     = decode_json($block_info->{connections} || '{}');
     my $settings = decode_json($block_info->{output_value} || '{}');
     $block_info->{parameter_mappings} = decode_json($block_info->{parameter_mappings} || '{}');
+
+    # --- Handle disabled blocks ---
+    if (defined $block_info->{enabled} && $block_info->{enabled} == 0) {
+        app->log->debug("Block $id is disabled. Passing through input.");
+        my @input_keys = keys %$conn;
+        if (@input_keys == 0) {
+            app->log->warn("Disabled block $id has no inputs and will produce no output.");
+            return $cache_dict->{$id} = undef;
+        }
+        # Pass through the first input's result.
+        my $input_block_id = $conn->{(sort keys %$conn)[0]};
+        return $cache_dict->{$id} = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
+    }
 
     # --- Handle special, non-command blocks first ---
     if ($block_info->{name} eq 'Input') {
@@ -501,18 +516,14 @@ helper get_result_of_block_id => sub {
 
     if ($cached) {
         my $cached_uuid = $cached->{uuid};
-        # Find the cached file on disk using the helper
         my $cached_file = $self->find_image_path_by_uuid($cached_uuid);
 
-        # VERIFY that the cached file actually exists on disk.
         if ($cached_file && -e $cached_file) {
             app->log->debug("Cache HIT for block $id (file verified)");
             return $cache_dict->{$id} = $cached_uuid;
         }
         else {
-            # The cache is stale. The file is missing.
             app->log->warn("STALE CACHE: Hit for block $id, but file for UUID '$cached_uuid' is missing. Deleting entry and reprocessing.");
-            # Delete the orphaned entry to self-heal the cache.
             $self->pg->db->query('DELETE FROM image_cache WHERE uuid = ?', $cached_uuid);
         }
     }
@@ -528,20 +539,40 @@ helper get_result_of_block_id => sub {
         my $value = $settings->{$key};
         $mapped_settings{$key} = $block_info->{parameter_mappings}->{$key}->{$value} // $value;
     }
-    my @positional_param_values;
     my $param_template = $block_info->{parameter_template} || '';
-    my @optional_flag_names = ($param_template =~ /--(\S+)/g);
-    my %optional_keys_hash = map { my $k = $_; $k =~ s/-/_/g; ($k => 1) } @optional_flag_names;
     my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
+
+    my @param_values;
     for my $key (@all_gui_fields) {
-        push @positional_param_values, $mapped_settings{$key} unless exists $optional_keys_hash{$key};
+        push @param_values, $mapped_settings{$key} // '';
     }
-    my @optional_param_values;
-    for my $flag_name (@optional_flag_names) {
-        my $key_name = $flag_name; $key_name =~ s/-/_/g;
-        push @optional_param_values, $mapped_settings{$key_name} if exists $mapped_settings{$key_name};
+
+    my @positional_param_values;
+    my @templated_args;
+
+    if ($param_template) {
+        my $num_template_params = () = $param_template =~ /%[sd]/g;
+        my $num_total_params    = @param_values;
+        my $num_positional_params = $num_total_params - $num_template_params;
+
+        if ($num_positional_params < 0) {
+            app->log->error("Configuration error for block $id ('$block_info->{name}'): The parameter_template has more placeholders ($num_template_params) than available gui_fields ($num_total_params).");
+            return undef;
+        }
+
+        if ($num_positional_params > 0) {
+            @positional_param_values = @param_values[0 .. $num_positional_params - 1];
+        }
+
+        my @template_values = @param_values[$num_positional_params .. $#param_values];
+        my $formatted_template_string = sprintf($param_template, @template_values);
+
+        # Use shellwords to correctly parse the template string into a list of arguments
+        @templated_args = shellwords($formatted_template_string);
+
+    } else {
+        @positional_param_values = @param_values;
     }
-    my $formatted_optionals = @optional_param_values ? sprintf($param_template, @optional_param_values) : '';
 
     # 3b. Resolve input UUIDs to full file paths
     my @input_file_paths;
@@ -554,30 +585,55 @@ helper get_result_of_block_id => sub {
         push @input_file_paths, $input_file->to_string;
     }
 
-    # 3c. Define output path. All generated images will be PNGs.
+    # 3c. Define output path
     my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid . '.png');
 
-    # 3d. Build and execute the command. Per request, we write directly to the final path.
-    # NOTE: This is less safe than writing to a temp file and renaming, as an interruption
-    # could leave a corrupt file at the final destination.
+    # 3d. Build the final command as a LIST of arguments to avoid shell injection/quoting issues.
+    my @command_parts = (
+        $block_info->{command},
+        $block_info->{name},
+        @input_file_paths,
+        $final_output_path->to_string,
+        @positional_param_values,
+        @templated_args
+    );
+    @command_parts = grep { defined && $_ ne '' } @command_parts;
 
-    # The array of @input_file_paths is placed directly into the command parts.
-    # This ensures that each input file is treated as a separate argument.
-    my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path, @positional_param_values, $formatted_optionals);
-    my $command = join ' ', grep { defined && $_ ne '' } @command_parts;
+    # 3e. Execute the command safely using a pipe that captures both stdout and stderr.
+    app->log->debug("Executing command array: " . join(', ', map { "'$_'" } @command_parts));
 
-    app->log->debug("Executing command: $command");
-    my $output = `$command 2>&1`;
+    my $pid = open(my $cmd_fh, '-|');
+    die "Cannot fork to run command: $!" unless defined $pid;
 
-    # Check for success by looking for the final file.
-    if ($? != 0 || !-e $final_output_path) {
-        app->log->error("Command failed: $command");
+    my $output = '';
+    my $exit_code;
+
+    if ($pid == 0) {
+        # --- CHILD PROCESS ---
+        # Redirect our STDERR to STDOUT so the parent can read both from one handle
+        open STDERR, '>&', STDOUT or die "Can't redirect child STDERR: $!";
+        # Execute the command. The list form is critical for security.
+        exec(@command_parts) or die "Can't exec command '$command_parts[0]': $!";
+    } else {
+        # --- PARENT PROCESS ---
+        # Read all output from the child process
+        {
+            local $/;
+            $output = <$cmd_fh>;
+        }
+        close($cmd_fh);
+        $exit_code = $?;
+    }
+
+    # 4. Check for success by looking at the exit code and the final file.
+    if ($exit_code != 0 || !-e $final_output_path) {
+        app->log->error("Command failed: " . join(' ', @command_parts));
         app->log->error("Output: $output");
-        unlink $final_output_path->to_string if -e $final_output_path; # Clean up partial file
+        unlink $final_output_path->to_string if -e $final_output_path;
         return undef;
     }
 
-    # 4. Store result in cache
+    # 5. Store result in cache
     $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
 
     return $cache_dict->{$id} = $output_uuid;

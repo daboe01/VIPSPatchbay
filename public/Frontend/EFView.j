@@ -403,6 +403,7 @@ var _inoutputObservationContext = 1094;
 {
     var bounds = CGRectInset([self bounds], 4, 4);
     var stringSize = [[self title] sizeWithAttributes:_stringAttributes];
+    var isEnabled = [[self data] valueForKey:@"enabled"];
 
     //draw title
     [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:_stringAttributes];
@@ -446,7 +447,13 @@ var _inoutputObservationContext = 1094;
     }
     
     //draw outline
-    [(([self isSelected]) && ([CPGraphicsContext currentContextDrawingToScreen])) ? [CPColor selectedControlColor] : [CPColor controlShadowColor] /*_titleColor*/ setStroke];
+    var strokeColor;
+    if (isEnabled == 0) {
+        strokeColor = ([self isSelected]) ? [CPColor darkGrayColor] : [CPColor grayColor];
+    } else {
+        strokeColor = ([self isSelected]) ? [CPColor selectedControlColor] : [CPColor controlShadowColor];
+    }
+    [strokeColor setStroke];
     var lineWidth = (([self isSelected]) && ([CPGraphicsContext currentContextDrawingToScreen])) ? 2.0 : 1.0;
     var shape = [CPBezierPath bezierPathWithRoundedRect:CGRectInset(bounds, -lineWidth / 2 + 0.15, -lineWidth / 2 + 0.15) radius:8]; //0.15 to be perfect on a zoomed printing
     [shape setLineWidth:lineWidth];
@@ -596,9 +603,11 @@ var _inoutputObservationContext = 1094;
 {
     var menu = [[CPMenu alloc] initWithTitle:@"Contextual Menu"],
         deleteMenuItem = [[CPMenuItem alloc] initWithTitle:@"Delete" action:@selector(delete:) keyEquivalent:@""],
+        enableMenuItem = [[CPMenuItem alloc] initWithTitle:@"Toggle enabled / disabled" action:@selector(toggleBlockEnabledState:) keyEquivalent:@""],
         addProbeMenuItem = [[CPMenuItem alloc] initWithTitle:@"Add Probe" action:@selector(addProbe:) keyEquivalent:@""];
 
     [menu addItem:addProbeMenuItem];
+    [menu addItem:enableMenuItem];
     [menu addItem:deleteMenuItem];
 
     return menu;

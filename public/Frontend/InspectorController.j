@@ -73,7 +73,7 @@
     {
         var block = [settingsBlocks objectAtIndex:i];
         var blockId = [block valueForKey:'id'];
-        var blockName = [block valueForKeyPath:'block_type.name'];
+        var blockName = [block valueForKeyPath:'block_type.display_name'];
         var gui_xml = [block valueForKeyPath:'block_type.gui_xml'];
 
         // A. Populate the _combinedDataObject
@@ -86,7 +86,7 @@
         }
 
         // B. Add this block's GUI definition to our master string
-        markupContent += '<label halign="left" font="bold 14px Lucida Grande">' + blockName + ' (id: ' + blockId + ')</label>';
+        markupContent += '<label halign="left">' + blockName + ' (id: ' + blockId + ')</label>';
 
         // C. Transform 'column' attributes to bind to the unique key in our flat dictionary
         var bindingPrefix = '_inspectorDataController.selection.';

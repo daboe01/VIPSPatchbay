@@ -19,14 +19,14 @@
         [self setWindow:window];
 
         _imageView = [[CPImageView alloc] initWithFrame:rect];
-        [_imageView setImageScaling:CPImageScaleProportionally];
+        [_imageView setImageScaling:CPImageScaleProportionallyUpOrDown];
         [window setContentView:_imageView];
         
         [self updateImage];
         [self _updateTitle];
 
         [_block addObserver:self forKeyPath:@"outputImage" options:CPKeyValueObservingOptionNew context:nil];
-        [_block addObserver:self forKeyPath:@"name" options:CPKeyValueOservingOptionNew context:nil];
+        [_block addObserver:self forKeyPath:@"name" options:CPKeyValueObservingOptionNew context:nil];
     }
     return self;
 }
@@ -58,7 +58,7 @@
 
 - (void)_updateTitle
 {
-    [[self window] setTitle:[_block name] + " (" + [_block ID] + ")"];
+    [[self window] setTitle:[_block valueForKey:"display_name"] + " (" + [_block valueForKey:"id"] + ")"];
 }
 
 - (void)windowWillClose:(CPNotification)aNotification

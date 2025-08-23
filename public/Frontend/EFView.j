@@ -406,6 +406,7 @@ var _inoutputObservationContext = 1094;
     var isEnabled = [[self data] valueForKey:@"enabled"];
 
     //draw title
+    [isEnabled ? [CPColor blackColor] : [CPColor grayColor] set];
     [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:_stringAttributes];
 
     // draw end of lace
@@ -612,11 +613,16 @@ var _inoutputObservationContext = 1094;
 
     return menu;
 }
+- (void)toggleBlockEnabledState:(id)sender
+{
+    [[self superview]._delegate toggleBlockEnabledState:[self data]];
+    [self setNeedsDisplay:YES];
+    [[self superview] setNeedsDisplay:YES];
+}
 
 - (void)addProbe:(id)sender
 {
-    var inputUUID = [[CPApp delegate] selectedInputUUID];
-    var controller = [[ProbeWindowController alloc] initWithBlock:[self data] andInputUUID:inputUUID];
+    var controller = [[ProbeWindowController alloc] initWithBlock:[self data]];
     [controller showWindow:self];
     [[CPApp delegate] addProbeController:controller];
 }
@@ -726,13 +732,4 @@ var _inoutputObservationContext = 1094;
     return CGSizeMake(result.width + 4, result.height + 4);
 }
 
-- (void)drawRect:(CGRect)rect
-{
-    var bounds = CGRectInset([self bounds], 4, 4);
-    var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:12] : [CPFont systemFontOfSize:12]};
-    var stringSize = [[self title] sizeWithAttributes:attributes];
-
-    //draw title
-    [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:attributes];
-}
 @end

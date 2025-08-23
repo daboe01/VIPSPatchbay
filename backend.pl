@@ -203,6 +203,70 @@ post '/VIPS/run' => sub {
     }
 };
 
+# for the image block inspector
+get '/VIPS/block/:block_id/image' => [block_id => qr/\d+/i] => sub {
+    my $self = shift;
+    my $block_id = $self->param('block_id');
+
+    # Query the cache for the most recently generated UUID for this specific block.
+    # This is much more efficient than re-running the pipeline.
+    my $cached_info = $self->pg->db->query(
+        'SELECT uuid FROM image_cache WHERE idblock = ? ORDER BY creation_timestamp DESC LIMIT 1',
+        $block_id
+    )->hash;
+
+    # If there's no cache entry, it means this block has never successfully produced an output.
+    unless ($cached_info && $cached_info->{uuid}) {
+        return $self->render(status => 404, text => 'No cached image output exists for this block.');
+    }
+
+    my $result_uuid = $cached_info->{uuid};
+
+    # Find the physical file on disk using the UUID.
+    my $image_file = $self->find_image_path_by_uuid($result_uuid);
+
+    # It's possible the cache is stale and the file was deleted. We must verify it exists.
+    unless ($image_file && -e $image_file) {
+        $self->app->log->warn("Cache entry found for block $block_id (UUID: $result_uuid), but the file is missing from the image store.");
+        return $self->render(status => 404, text => 'Cached image file is missing from disk.');
+    }
+
+    # To ensure the image can be displayed in any browser, we convert it to a standard
+    # format like PNG on-the-fly. This is robust and handles intermediate formats like .vips.
+
+    # 1. Create a temporary file to hold the PNG conversion.
+    my $temp = File::Temp->new( SUFFIX => '.png', UNLINK => 1 );
+    my $temp_filename = $temp->filename;
+
+    # 2. Build the 'vips pngsave' command to write to the temporary file.
+    my @cmd = ('vips', 'pngsave', $image_file->to_string, $temp_filename);
+
+    # 3. Execute the command and capture any errors.
+    my $error_output = `@cmd 2>&1`;
+
+    # 4. Check the command's exit status.
+    if ($? != 0) {
+        $self->app->log->error("Failed to convert cached image to PNG for preview. VIPS said: $error_output");
+        return $self->render(status => 500, text => "Failed to generate preview image.");
+    }
+
+    # 5. Read the binary data from the successfully created temporary PNG file.
+    open(my $fh, '<:raw', $temp_filename) or do {
+        $self->app->log->error("Could not open temp file '$temp_filename' for reading: $!");
+        return $self->render(status => 500, text => "Server error reading temporary image.");
+    };
+    my $png_data;
+    {
+        local $/ = undef; # Slurp mode to read the entire file at once
+        $png_data = <$fh>;
+    }
+    close $fh;
+
+    # 6. Send the raw PNG data to the browser with the correct content type.
+    $self->res->headers->content_type('image/png');
+    return $self->render(data => $png_data);
+};
+
 get '/VIPS/block/:block_id/image/:input_uuid' => [block_id => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     my $block_id = $self->param('block_id');

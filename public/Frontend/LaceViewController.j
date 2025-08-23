@@ -88,31 +88,24 @@ BaseURL=HostURL+"/";
     id _defaultMenu @accessors(property = defaultMenu);
 }
 
-- (void)toggleBlockEnabledState:(id)sender
+- (void)toggleBlockEnabledState:(id)blockToUpdate
 {
-    var selectedBlock = [_screenController selection];
-    if (!selectedBlock) return;
-
-    var blockID = [selectedBlock valueForKey:@"id"];
-    var blockToUpdate = [_blocksController._entity objectWithPK:blockID];
-
     if (!blockToUpdate) return;
+
+    var blockID = [blockToUpdate valueForKey:@"id"];
 
     var currentEnabledState = [blockToUpdate valueForKey:@"enabled"];
     // Default to enabled (1) if the property doesn't exist
     var newState = (currentEnabledState == 0) ? 1 : 0;
 
+    // Send the update to the backend
     [blockToUpdate setValue:newState forKey:@"enabled"];
 
-    // Send the update to the backend
     var myreq = [CPURLRequest requestWithURL:@"/VIPS/blocks/id/" + blockID];
     [myreq setHTTPMethod:@"PUT"];
     [myreq setHTTPBody:[@{@"enabled": newState} toJSON]];
     [myreq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [CPURLConnection connectionWithRequest:myreq delegate:nil];
-
-    // Force the view to redraw
-    [[self view] setNeedsDisplay:YES];
 }
 
 + (void)connectBlock:(id)mydata toOtherBlock:(id)mydata2 usingOutletNamed:(CPString)name

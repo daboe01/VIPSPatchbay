@@ -344,11 +344,6 @@ BaseURL=HostURL+"/";
     if (object === projectsController && keyPath === @"selection") {
         [self reloadOutputImagesForProject:[projectsController selection]];
     }
-    else if (object === inputController && keyPath === @"selection") {
-        [self setSelectedInputUUID:[[inputController selection] valueForKey:@"uuid"]];
-        for (var i = 0; i < [_probeControllers count]; i++)
-            [[_probeControllers objectAtIndex:i] updateImage];
-    }
 }
 
 - (void)connection:(CPConnection)aConnection didReceiveData:(CPData)aData
@@ -445,7 +440,7 @@ BaseURL=HostURL+"/";
     [laceViewController setAddBlocksView:[addBlocksWindow contentView]];
 
     [projectsController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
-    [inputController addObserver:self forKeyPath:@"selection" options:CPKeyValueObservingOptionNew context:NULL];
+
     [self setThumbnailSize:100];
     [self reloadOutputImages:self];
 }

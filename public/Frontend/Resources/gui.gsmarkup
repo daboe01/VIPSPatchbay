@@ -38,7 +38,9 @@
                                 <tableColumn identifier="name" title="Pipeline Name" editable="YES" width="200"/>
                             </tableView>
                         </scrollView>
-                        <ButtonBar target="#CPOwner.projectsController" actionsButton="NO" minusButtonAction="remove:" plusButtonAction="insert:"/>
+                        <ButtonBar target="#CPOwner.projectsController" actionsButton="YES" minusButtonAction="remove:" plusButtonAction="insert:">
+                            <popUpButtonItem title="Duplicate project" target="#CPOwner" action="duplicateProject:"/>
+                        </ButtonBar>
                     </vbox>
 
                     <vbox>

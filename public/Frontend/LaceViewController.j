@@ -97,10 +97,9 @@ BaseURL=HostURL+"/";
     var currentEnabledState = [blockToUpdate valueForKey:@"enabled"];
     // Default to enabled (1) if the property doesn't exist
     var newState = (currentEnabledState == 0) ? 1 : 0;
-
-    // Send the update to the backend
     [blockToUpdate setValue:newState forKey:@"enabled"];
 
+    // Send the update to the backend
     var myreq = [CPURLRequest requestWithURL:@"/VIPS/block/" + blockID + '/toggle_enabled'];
     [myreq setHTTPMethod:@"POST"];
     [myreq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];

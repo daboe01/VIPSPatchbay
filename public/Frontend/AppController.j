@@ -179,6 +179,8 @@ BaseURL=HostURL+"/";
     id inspectorController;
     id _probeControllers;
     id selectedInputUUID @accessors;
+
+    id duplicateConnection;
 }
 
 - (void)setThumbnailSize:(id)sender
@@ -218,29 +220,11 @@ BaseURL=HostURL+"/";
     [myButton setEnabled:YES];
 }
 
-- (void)performImportCSV:(id)sender suffix:(CPString)suffix
+- (void)duplicateProject:(id)sender
 {
-    var myreq = [CPURLRequest requestWithURL:"/LLM/import_embedding_dataset/" + [embeddedDatasetsController valueForKeyPath:"selection.id"] + suffix];
+    var myreq = [CPURLRequest requestWithURL:BaseURL + "VIPS/duplicate_project/" + [projectsController valueForKeyPath:"selection.id"]];
     [myreq setHTTPMethod:"POST"];
-    [myreq setHTTPBody:[importCSVText stringValue]];
-    [CPURLConnection connectionWithRequest:myreq delegate:nil];
-
-    [importCSVText setString:'']; // fixme: better gui feedback
-}
-
-- (void)performImportCSV:(id)sender
-{
-    [self performImportCSV:sender suffix:""];
-}
-
-- (void)performImportCSVAppend:(id)sender
-{
-    [self performImportCSV:sender suffix:"?preserve=1"];
-}
-
-- (void)performImportCSVRemove:(id)sender
-{
-    [self performImportCSV:sender suffix:"?remove=1"];
+    duplicateConnection = [CPURLConnection connectionWithRequest:myreq delegate:self];
 }
 
 -(void)openWindowWithURL:(CPString)myURL inWindowID:(CPString)myid
@@ -371,10 +355,11 @@ BaseURL=HostURL+"/";
 
 - (void)connection:(CPConnection)aConnection didReceiveData:(CPData)aData
 {
+    if (aConnection._senderButton && [aConnection._senderButton isKindOfClass:CPButton])
+        [self resetButtonBusy:aConnection._senderButton];
+
     if (aConnection == runConnection)
     {
-        if (aConnection._senderButton && [aConnection._senderButton isKindOfClass:CPButton])
-            [self resetButtonBusy:aConnection._senderButton];
 
         // After a successful run, just reload the outputs for the current project.
         // The bindings will take care of updating the UI.
@@ -391,6 +376,12 @@ BaseURL=HostURL+"/";
         }
 
         [outputController setContent:imagesOut];
+    }
+    else if (aConnection == duplicateConnection)
+    {
+        [projectsController reloadRoot];
+        // fixme: select duplicate
+        duplicateConnection = nil;
     }
 }
 

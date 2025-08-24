@@ -86,6 +86,70 @@ helper find_image_path_by_uuid => sub {
     return $found_file;
 };
 
+post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
+{
+    my $self = shift;
+    my $id = $self->param('id');
+
+    # Start a transaction
+    my $tx = $self->pg->db->begin;
+
+    # 1. Duplicate the project
+    my $new_project_id = $self->pg->db->query(
+                                                'INSERT INTO projects (name) SELECT name || \' (copy)\' FROM projects WHERE id = ? RETURNING id',
+                                                $id
+                                             )->hash->{id};
+
+    # 2. Get all blocks for the old project
+    my $blocks = $self->pg->db->query('SELECT * FROM blocks WHERE idproject = ?', $id)->hashes;
+
+    # 3. Create a mapping from old block IDs to new block IDs
+    my %id_map;
+
+    # 4. Duplicate each block
+    for my $block (@$blocks) {
+        my $old_block_id = $block->{id};
+        my $new_block_id = $self->pg->db->query(
+                                                    'INSERT INTO blocks (idblock, name, connections, output_value, "originX", "originY", idproject, auxfield) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                                                    $block->{idblock},
+                                                    $block->{name},
+                                                    $block->{connections},
+                                                    $block->{output_value},
+                                                    $block->{"originX"},
+                                                    $block->{"originY"},
+                                                    $new_project_id,
+                                                    $block->{auxfield}
+                                                 )->hash->{id};
+        $id_map{$old_block_id} = $new_block_id;
+    }
+
+    # 5. Update connections in the new blocks
+    for my $old_block_id (keys %id_map) {
+        my $new_block_id = $id_map{$old_block_id};
+        my $connections = $self->pg->db->query('SELECT connections FROM blocks WHERE id = ?', $new_block_id)->hash->{connections};
+
+        if ($connections) {
+            my $decoded_connections = decode_json($connections);
+            my $new_connections = {};
+
+            for my $key (keys %$decoded_connections) {
+                my $old_target_id = $decoded_connections->{$key};
+                if (exists $id_map{$old_target_id}) {
+                    $new_connections->{$key} = $id_map{$old_target_id};
+                } else {
+                    $new_connections->{$key} = $old_target_id; # Keep old ID if not in this project
+                }
+            }
+            $self->pg->db->query('UPDATE blocks SET connections = ? WHERE id = ?', encode_json($new_connections), $new_block_id);
+        }
+    }
+
+    # Commit the transaction
+    $tx->commit;
+
+    $self->render(json => {err => $DBI::errstr, pk => $new_project_id});
+};
+
 get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     my $uuid = $self->param('uuid');

@@ -5,14 +5,15 @@
 #
 # It performs the following steps:
 # 1. Reads a binary input image containing objects (blobs).
-# 2. Reads a mask image containing black dots that mark desired object locations.
+# 2. Reads a mask image containing black dots that mark the blobs to be retained.
 # 3. Verifies that both images have the same dimensions.
-# 4. Identifies all connected objects in the input image and calculates their centroids.
-# 5. Checks which object centroids from the input image fall on the black dots of the mask.
-# 6. Removes any object that is not marked by a dot in the mask.
-# 7. Writes the resulting filtered binary image to a new file.
+# 4. Identifies all black dots in the mask image and calculates their centroids.
+# 5. Labels all connected objects (blobs) in the input image.
+# 6. Checks which blobs in the input image are "hit" by a centroid from the mask.
+# 7. Removes any blob that was not marked by a mask centroid.
+# 8. Writes the resulting filtered binary image to a new file.
 #
-# The mask's black dots should align with the centroids of the blobs to be kept.
+# The mask's black dots should be positioned over the blobs to be kept.
 #
 # Usage: Rscript filter_by_mask.R <INFILE> <MASKFILE> <OUTFILE>
 #
@@ -37,11 +38,12 @@ maskfile <- args[2]
 outfile <- args[3]
 
 
-# --- Image Processing ---
+# --- Image Loading ---
 
 cat("Reading input image from:", infile, "\n")
 tryCatch({
   img <- readImage(infile)
+
 }, error = function(err) {
   stop(paste("Error: Cannot read input file:", infile, "\n", err$message), call. = FALSE)
 })
@@ -53,6 +55,8 @@ tryCatch({
   stop(paste("Error: Cannot read mask file:", maskfile, "\n", err$message), call. = FALSE)
 })
 
+print(dim(img))
+print(dim(mask))
 # --- Pre-processing and Validation ---
 
 # Ensure images are 2D grayscale for consistent processing
@@ -65,7 +69,7 @@ if (colorMode(mask) == Color) {
   mask <- channel(mask, "gray")
 }
 
-# CRITICAL FIX: Verify that image dimensions match
+# CRITICAL: Verify that image dimensions match
 if (!all(dim(img) == dim(mask))) {
   stop(paste(
     "Error: Input image dimensions (", paste(dim(img), collapse="x"),
@@ -73,68 +77,96 @@ if (!all(dim(img) == dim(mask))) {
   ), call. = FALSE)
 }
 
+  if (length(dim(img)) == 3) {
+  	  img <- img[,,1]
+  }
+  if (length(dim(mask)) == 3) {
+  	  mask <- mask[,,1]
+  }
 
-cat("Labeling objects in the input image...\n")
-# Create a labeled image by finding connected components.
-# Input is treated as binary (non-zero pixels are foreground).
-img_labels <- bwlabel(img)
+# --- Image Processing ---
 
+cat("Labeling objects (dots) in the mask image...\n")
+# `bwlabel` considers non-zero pixels as the foreground to be labeled.
+mask_labels <- bwlabel(mask)
 
-cat("Calculating centroids for all objects...\n")
-# Compute moment features to get the centroid (m.cx, m.cy) of each object.
-features <- computeFeatures.moment(img_labels)
+cat("Calculating centroids for mask dots...\n")
+# Compute moment features to get the centroid (m.cx, m.cy) of each dot.
+mask_features <- computeFeatures.moment(mask_labels)
 
-# Check if any objects were found before proceeding
-if (is.null(features) || nrow(features) == 0) {
-  cat("No objects found in the input image. Writing an empty image.\n")
+# Check if any dots were found in the mask before proceeding
+if (is.null(mask_features) || nrow(mask_features) == 0) {
+  cat("No dots found in the mask image. Writing an empty image.\n")
   empty_img <- Image(0, dim=dim(img))
   writeImage(empty_img, outfile)
+  
 } else {
-  cat("Found", nrow(features), "objects. Filtering based on the mask.\n")
+  cat("Found", nrow(mask_features), "dots in the mask.\n")
 
-  # Round the centroid coordinates to the nearest pixel
-  centroids <- round(features[, c('m.cx', 'm.cy')])
-  
-  # Get mask dimensions for boundary checks
-  mask_dims <- dim(mask)
+  cat("Labeling objects (blobs) in the input image...\n")
+  img_labels <- bwlabel(img)
+  total_blobs <- max(img_labels)
 
-  # Identify which objects to remove
-  # An object is kept if its centroid corresponds to a black pixel in the mask.
-  # We assume black is a low value (e.g., < 0.1) in the mask.
-  to_remove <- c()
-  for (i in 1:nrow(centroids)) {
-    y_coord <- centroids[i, 'm.cy']
-    x_coord <- centroids[i, 'm.cx']
-
-    # ROBUSTNESS FIX: Check if coordinates are within the mask's bounds
-    if (y_coord < 1 || y_coord > mask_dims[1] || x_coord < 1 || x_coord > mask_dims[2]) {
-      # This centroid is outside the mask, mark it for removal
-      to_remove <- c(to_remove, i)
-      next # Skip to the next iteration
-    }
-
-    # Get the pixel value from the mask at the centroid's location
-    # Note: R matrices are 1-indexed, coordinates are (row, col) which is (y, x)
-    pixel_val <- mask[y_coord, x_coord]
-
-    # If the pixel is not black (is bright), mark the object for removal
-    if (pixel_val > 0.1) {
-      to_remove <- c(to_remove, i)
-    }
-  }
-  
-  if (length(to_remove) > 0) {
-    cat("Removing", length(to_remove), "unmatched objects.\n")
-    img_filtered <- rmObjects(img_labels, to_remove)
+  if (total_blobs == 0) {
+    cat("No objects found in the input image. Writing an empty image.\n")
+    empty_img <- Image(0, dim=dim(img))
+    writeImage(empty_img, outfile)
   } else {
-    cat("All objects were matched by the mask. No objects removed.\n")
-    img_filtered <- img_labels
+    cat("Found", total_blobs, "blobs in the input image. Probing with mask centroids.\n")
+
+    # Round the mask centroid coordinates to the nearest pixel
+    mask_centroids <- round(mask_features[, c('m.cx', 'm.cy')])
+    img_dims <- dim(img_labels)
+    
+    # Identify which blobs in the input image are "hit" by a mask centroid
+    ids_to_keep <- c()
+    for (i in 1:nrow(mask_centroids)) {
+      x_coord <- mask_centroids[i, 'm.cx']
+      y_coord <- mask_centroids[i, 'm.cy']
+
+      # ROBUSTNESS: Check if centroid coordinates are within the image's bounds
+      if (TRUE) {
+        
+        # Get the label ID of the blob at the centroid's location
+        # A value of 0 means the centroid hit the background.
+        blob_id <- img_labels[x_coord, y_coord][[1]]
+        print(blob_id)
+        # If the centroid landed on a blob, record that blob's ID
+        if (blob_id > 0) {
+          ids_to_keep <- c(ids_to_keep, blob_id)
+        }
+      }
+    }
+    
+    # Get the unique set of blob IDs to retain
+    ids_to_keep <- unique(ids_to_keep)
+
+    if (length(ids_to_keep) > 0) {
+      cat(length(ids_to_keep), "blobs will be retained.\n")
+      
+      # Determine which object IDs to remove by finding the difference
+      # between all blob IDs and the ones we want to keep.
+      all_ids <- 1:total_blobs
+      to_remove <- setdiff(all_ids, ids_to_keep)
+      
+      if (length(to_remove) > 0) {
+        cat("Removing", length(to_remove), "unmarked blobs.\n")
+        img_filtered <- rmObjects(img_labels, to_remove)
+      } else {
+        cat("All blobs were marked by the mask. No objects removed.\n")
+        img_filtered <- img_labels
+      }
+    } else {
+      cat("No input image blobs were marked by the mask centroids. Creating empty image.\n")
+      # If no blobs were hit, create an empty image for the output
+      img_filtered <- Image(0, dim=dim(img))
+    }
+    
+    cat("Writing filtered image to:", outfile, "\n")
+    # Convert the final labeled image back to a binary (black and white) image
+    # Any pixel > 0 in the filtered labeled image becomes 1 (white).
+    writeImage(img_filtered > 0, outfile)
   }
-  
-  cat("Writing filtered image to:", outfile, "\n")
-  # Convert the labeled image back to a binary (black and white) image
-  # Any pixel > 0 in the filtered labeled image becomes 1 (white).
-  writeImage(img_filtered > 0, outfile)
 }
 
 cat("Done.\n")

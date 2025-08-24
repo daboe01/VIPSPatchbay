@@ -28,7 +28,7 @@
 
 - (void)updateImage
 {
-    var imageURL = "/VIPS/block/" + [_block valueForKey:"id"] + "/image/";
+    var imageURL = "/VIPS/block/" + [_block valueForKey:"id"] + "/image/" + "?cachebuster=" + Math.floor(Math.random() * 10000);
     var image = [[CPImage alloc] initWithContentsOfFile:imageURL];
     [_imageView setImage:image];
 }

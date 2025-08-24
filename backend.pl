@@ -24,6 +24,7 @@ no warnings 'uninitialized';
 helper pg => sub { state $pg = Mojo::Pg->new('postgresql://postgres@localhost/vips_patchbay') };
 
 my $IMAGE_STORE_DIR = Mojo::File->new('./image_store')->make_path->to_abs;
+my $CACHED_IMAGE_DIR = $IMAGE_STORE_DIR->child('cached_images')->make_path;
 my $THUMBNAIL_DIR = $IMAGE_STORE_DIR->child('thumbnails')->make_path;
 
 # turn browser cache off
@@ -68,14 +69,19 @@ post '/VIPS/upload' => sub {
 # New helper to find an image path by its base UUID, regardless of extension
 helper find_image_path_by_uuid => sub {
     my ($self, $uuid) = @_;
-    # Basic validation to ensure we're looking for a UUID-like string
     return undef unless $uuid && $uuid =~ /^[0-9a-f\-]{36}$/i;
 
-    # Use Mojo::File's list which is safer and more portable than glob.
-    # It finds the first file that starts with "uuid."
+    # Search in the main image store first
     my $found_file = $IMAGE_STORE_DIR->list({dir => 0})->first(sub {
         $_->basename =~ /^\Q$uuid\E(\.|$)/
     });
+
+    # If not found, search in the cached images directory
+    if (!$found_file) {
+        $found_file = $CACHED_IMAGE_DIR->list({dir => 0})->first(sub {
+            $_->basename =~ /^\Q$uuid\E(\.|$)/
+        });
+    }
 
     return $found_file;
 };
@@ -650,7 +656,7 @@ helper get_result_of_block_id => sub {
     }
 
     # 3c. Define output path
-    my $final_output_path = $IMAGE_STORE_DIR->child($output_uuid . '.png');
+    my $final_output_path = $CACHED_IMAGE_DIR->child($output_uuid . '.png');
 
     # 3d. Build the final command as a LIST of arguments to avoid shell injection/quoting issues.
     my @command_parts = (

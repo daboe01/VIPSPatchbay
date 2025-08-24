@@ -86,8 +86,6 @@ helper find_image_path_by_uuid => sub {
     return $found_file;
 };
 
-
-# REPLACEMENT for the /VIPS/preview/:uuid route
 get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     my $uuid = $self->param('uuid');
@@ -162,6 +160,77 @@ get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
 
     # Finally, serve the newly created thumbnail
     return $self->reply->file($thumbnail_path);
+};
+
+# route to toggle a block's enabled/disabled state and clear downstream cache
+any '/VIPS/block/:block_id/toggle_enabled' => [block_id => qr/\d+/] => sub {
+    my $self = shift;
+    my $block_id = $self->param('block_id');
+    my $db = $self->pg->db;
+
+    # 1. Get the block's current state and its project ID
+    my $block_info = $db->query('SELECT enabled, idproject FROM blocks WHERE id = ?', $block_id)->hash;
+    unless ($block_info) {
+        return $self->render(status => 404, json => { error => "Block with ID $block_id not found." });
+    }
+
+    # 2. Determine the new state. A NULL or undefined 'enabled' field is treated as enabled (1).
+    my $new_state = (defined $block_info->{enabled} && $block_info->{enabled} == 1) ? 0 : 1;
+
+    # 3. Update the block's state in the database
+    $db->update('blocks', { enabled => $new_state }, { id => $block_id });
+
+    # 4. If the block was just disabled, invalidate the cache by deleting the physical files.
+    if ($new_state == 0) {
+        my $idproject = $block_info->{idproject};
+        my $all_blocks_in_project = $db->query('SELECT id, connections FROM blocks WHERE idproject = ?', $idproject)->hashes;
+
+        # Use Breadth-First Search (BFS) to find all downstream blocks
+        my @queue = ($block_id);
+        my %downstream_block_ids = ($block_id => 1);
+
+        while (my $current_id = shift @queue) {
+            for my $block (@$all_blocks_in_project) {
+                next if $downstream_block_ids{$block->{id}}; # Skip if already in our set
+                my $connections = decode_json($block->{connections} || '{}');
+                for my $input_id (values %$connections) {
+                    if ($input_id == $current_id) {
+                        $downstream_block_ids{$block->{id}} = 1;
+                        push @queue, $block->{id};
+                        last;
+                    }
+                }
+            }
+        }
+
+        my @ids_to_clear = keys %downstream_block_ids;
+        if (@ids_to_clear) {
+            my $placeholders = join(',', ('?') x @ids_to_clear);
+
+            # First, get all UUIDs from the cache for the downstream blocks.
+            my $cached_entries = $db->query("SELECT uuid FROM image_cache WHERE idblock IN ($placeholders)", @ids_to_clear)->hashes;
+            
+            my $files_deleted_count = 0;
+            for my $entry (@$cached_entries) {
+                my $uuid_to_delete = $entry->{uuid};
+                # Use the helper to find the physical file path.
+                my $file_path = $self->find_image_path_by_uuid($uuid_to_delete);
+
+                if ($file_path && -e $file_path) {
+                    # Attempt to delete the file.
+                    if (unlink $file_path) {
+                        $self->app->log->debug("Deleted cached file for UUID $uuid_to_delete: $file_path");
+                        $files_deleted_count++;
+                    } else {
+                        $self->app->log->error("Failed to delete cached file for UUID $uuid_to_delete at $file_path: $!");
+                    }
+                }
+            }
+            $self->app->log->info("Block $block_id disabled. Invalidated downstream cache by deleting $files_deleted_count physical file(s).");
+        }
+    }
+
+    return $self->render(json => { success => 1, newState => $new_state });
 };
 
 get '/VIPS/list_images' => sub {
@@ -362,9 +431,9 @@ post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
 
     # Find the final output block for the given project
     my $output_block = $self->pg->db->query(
-        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
-        $projectid
-    )->hash;
+                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+                                                $projectid
+                                            )->hash;
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $projectid" });
@@ -508,7 +577,9 @@ helper get_result_of_block_id => sub {
     my ($self, $id, $initial_input_uuid, $cache_dict) = @_;
     $cache_dict //= {}; # Memoization for recursive calls within a single run
 
-    return $cache_dict->{$id} if exists $cache_dict->{$id};
+    # We create a composite key from the block ID and the initial input UUID.
+    my $cache_key = "$id:$initial_input_uuid";
+    return $cache_dict->{$cache_key} if exists $cache_dict->{$cache_key};
 
     my $block_info = $self->pg->db->query(q{
                                                 SELECT
@@ -535,22 +606,23 @@ helper get_result_of_block_id => sub {
         my @input_keys = keys %$conn;
         if (@input_keys == 0) {
             app->log->warn("Disabled block $id has no inputs and will produce no output.");
-            return $cache_dict->{$id} = undef;
+            return $cache_dict->{$cache_key} = undef;
         }
         # Pass through the first input's result.
         my $input_block_id = $conn->{(sort keys %$conn)[0]};
-        return $cache_dict->{$id} = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
+        # Use the modified cache key for writes
+        return $cache_dict->{$cache_key} = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
     }
 
     # --- Handle special, non-command blocks first ---
     if ($block_info->{name} eq 'Input') {
-        return $cache_dict->{$id} = $initial_input_uuid;
+        return $cache_dict->{$cache_key} = $initial_input_uuid;
     }
 
     if ($block_info->{name} eq 'Load Image') {
         my $filename = $settings->{filename};
         my $res = $self->pg->db->query('SELECT uuid FROM input_images WHERE original_filename = ?', $filename)->hash;
-        return $cache_dict->{$id} = $res->{uuid};
+        return $cache_dict->{$cache_key} = $res->{uuid};
     }
 
     if ($block_info->{name} eq 'Image Preview') {
@@ -562,7 +634,7 @@ helper get_result_of_block_id => sub {
         }
         my $input_block_id = $conn->{$input_keys[0]};
         my $input_uuid = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
-        return $cache_dict->{$id} = $input_uuid;
+        return $cache_dict->{$cache_key} = $input_uuid;
     }
 
     # --- General Command Execution Logic ---
@@ -590,7 +662,7 @@ helper get_result_of_block_id => sub {
 
         if ($cached_file && -e $cached_file) {
             app->log->debug("Cache HIT for block $id (file verified)");
-            return $cache_dict->{$id} = $cached_uuid;
+            return $cache_dict->{$cache_key} = $cached_uuid;
         }
         else {
             app->log->warn("STALE CACHE: Hit for block $id, but file for UUID '$cached_uuid' is missing. Deleting entry and reprocessing.");
@@ -706,7 +778,7 @@ helper get_result_of_block_id => sub {
     # 5. Store result in cache
     $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
 
-    return $cache_dict->{$id} = $output_uuid;
+    return $cache_dict->{$cache_key} = $output_uuid;
 };
 
 ###################################################################

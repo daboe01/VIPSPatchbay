@@ -131,6 +131,23 @@ BaseURL=HostURL+"/";
 
 @end
 
+@implementation FSArrayController(baseReloadFix)
+
+// <!> fixme: refac to cappusance
+- (void)fullyReloadAsync
+{   var entity = self._entity;
+    entity._pkcache = [];
+    [entity._store fetchObjectsForURLRequest:[entity._store requestForAddressingAllObjectsInEntity:entity] inEntity:entity requestDelegate:self._contentObject];
+}
+- (void)reloadRoot
+{
+   var entity = self._entity;
+    entity._pkcache = [];
+    [self setContent:[entity allObjects]];
+}
+
+@end
+
 @implementation AppController : CPObject
 {
     id  store @accessors;
@@ -339,6 +356,12 @@ BaseURL=HostURL+"/";
     [self reloadOutputImagesForProject:[projectsController selection]];
 }
 
+- (void)reloadInputImages:(id)sender
+{
+    [inputController reloadRoot];
+}
+
+
 - (void)observeValueForKeyPath:(CPString)keyPath ofObject:(id)object change:(CPDictionary)change context:(void)context
 {
     if (object === projectsController && keyPath === @"selection") {
@@ -406,6 +429,7 @@ BaseURL=HostURL+"/";
     }];
     [aCup.queue removeObjectsAtIndexes:indexes];
     [[aCup queueController] setContent:aCup.queue];
+    [self reloadInputImages:self];
 }
 
 - (void)applicationDidFinishLaunching:(CPNotification)aNotification

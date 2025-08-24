@@ -101,9 +101,8 @@ BaseURL=HostURL+"/";
     // Send the update to the backend
     [blockToUpdate setValue:newState forKey:@"enabled"];
 
-    var myreq = [CPURLRequest requestWithURL:@"/VIPS/blocks/id/" + blockID];
-    [myreq setHTTPMethod:@"PUT"];
-    [myreq setHTTPBody:[@{@"enabled": newState} toJSON]];
+    var myreq = [CPURLRequest requestWithURL:@"/VIPS/block/" + blockID + '/toggle_enabled'];
+    [myreq setHTTPMethod:@"POST"];
     [myreq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [CPURLConnection connectionWithRequest:myreq delegate:nil];
 }

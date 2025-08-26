@@ -620,6 +620,13 @@ var _inoutputObservationContext = 1094;
     [[self superview] setNeedsDisplay:YES];
 }
 
+- (void)removeBlocks:(id)sender
+{
+    [[self superview]._delegate removeBlocks:self];
+    [self setNeedsDisplay:YES];
+    [[self superview] setNeedsDisplay:YES];
+}
+
 - (void)addProbe:(id)sender
 {
     var controller = [[ProbeWindowController alloc] initWithBlock:[self data]];

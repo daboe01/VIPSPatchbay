@@ -41,6 +41,10 @@ cat("Reading image from:", infile, "\n")
 tryCatch({
   # 'e' is used as the variable name to match your original snippet
   e <- readImage(infile)
+  if (length(dim(e)) == 3) {
+  e <- e[,,1]
+}
+
 }, error = function(err) {
   stop(paste("Error: Cannot read input file:", infile, "\n", err$message), call. = FALSE)
 })
@@ -54,9 +58,6 @@ e.lab <- bwlabel(e > 0.5)
 
 # 2. Handle color images: if the labeled image has 3 dimensions (a color channel),
 #    collapse it to the first 2D slice.
-if (length(dim(e.lab)) == 3) {
-  e.lab <- e.lab[,,1]
-}
 
 cat("Calculating shape features for all objects...\n")
 
@@ -87,7 +88,7 @@ if (is.null(features) || nrow(features) == 0) {
   # 6. Write the final, cleaned image to the output file.
   #    The output is a labeled image where small objects have been removed.
   #    Using normalize() makes the output visually clearer (scales pixel values to 0-1).
-  writeImage(normalize(e.lab.1), outfile)
+  writeImage(normalize(e.lab.1 > 0), outfile)
 }
 
 cat("Done.\n")

@@ -86,6 +86,87 @@ helper find_image_path_by_uuid => sub {
     return $found_file;
 };
 
+post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => sub {
+    my $self = shift;
+    my $idproject = $self->param('idproject');
+
+    # 1. Expect an 'image' file in the form data.
+    my $upload = $self->req->upload('image');
+    unless ($upload && $upload->size > 0) {
+        return $self->render(status => 400, json => { error => "Missing or empty 'image' file upload in the request." });
+    }
+
+    # This array will keep track of all files created during this request.
+    my @temp_files_to_delete;
+
+    # Set up a deferred subroutine to ensure cleanup happens even if errors occur.
+    $self->on(finish => sub {
+        for my $file_path (@temp_files_to_delete) {
+            next unless $file_path && -e $file_path;
+            if (unlink $file_path) {
+                $self->app->log->debug("Cleaned up temp file: $file_path");
+            } else {
+                $self->app->log->error("Failed to clean up temp file $file_path: $!");
+            }
+        }
+    });
+
+    # 2. Save the uploaded image to a temporary location in the image store with a unique UUID.
+    # This makes it compatible with the existing `get_result_of_block_id` helper.
+    my $ug = Data::UUID->new;
+    my $temp_input_uuid = $ug->create_str();
+    my ($name, $path, $ext) = fileparse($upload->filename, qr/\.[^.]*/);
+    $ext //= '.tmp'; # Ensure there's an extension.
+    my $temp_input_filename = $temp_input_uuid . $ext;
+    my $temp_input_path = $IMAGE_STORE_DIR->child($temp_input_filename);
+    $upload->move_to($temp_input_path);
+    push @temp_files_to_delete, $temp_input_path;
+
+    # 3. Find the final output block for the project.
+    my $output_block = $self->pg->db->query(
+                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+                                                $idproject
+                                            )->hash;
+
+    unless ($output_block && $output_block->{id}) {
+        return $self->render(status => 404, json => { error => "Final output block not found for project $idproject." });
+    }
+
+    # 4. Execute the pipeline using the existing helper.
+    # The memoization cache will collect the UUIDs of all intermediate files created.
+    my %processing_cache;
+    my $final_output_uuid = $self->get_result_of_block_id($output_block->{id}, $temp_input_uuid, \%processing_cache);
+
+    # Add all generated intermediate/cached files to our cleanup list.
+    for my $generated_uuid (values %processing_cache) {
+        my $file_path = $self->find_image_path_by_uuid($generated_uuid);
+        push @temp_files_to_delete, $file_path if $file_path;
+    }
+
+    unless ($final_output_uuid) {
+        return $self->render(status => 500, json => { error => "Stateless image processing pipeline failed to produce an output." });
+    }
+
+    my $final_image_path = $self->find_image_path_by_uuid($final_output_uuid);
+    unless ($final_image_path && -e $final_image_path) {
+        $self->app->log->error("Processing finished, but final file for UUID $final_output_uuid is missing.");
+        return $self->render(status => 500, json => { error => "Pipeline execution failed to produce a file." });
+    }
+
+    # 5. Read the final image data from its temporary cached location.
+    my $image_data = eval { $final_image_path->slurp };
+    if ($@) {
+        $self->app->log->error("Could not read final image file '$final_image_path': $@");
+        return $self->render(status => 500, text => "Server error reading final image.");
+    }
+
+    # 6. Send the raw image data as the response.
+    # The helper always saves as PNG, so we set the content type accordingly.
+    $self->res->headers->content_type('image/png');
+
+    return $self->render(data => $image_data);
+};
+
 post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
 {
     my $self = shift;
@@ -110,7 +191,7 @@ post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
     for my $block (@$blocks) {
         my $old_block_id = $block->{id};
         my $new_block_id = $self->pg->db->query(
-                                                    'INSERT INTO blocks (idblock, name, connections, output_value, "originX", "originY", idproject, auxfield) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                                                    'INSERT INTO blocks (idblock, name, connections, output_value, "originX", "originY", idproject, auxfield, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
                                                     $block->{idblock},
                                                     $block->{name},
                                                     $block->{connections},
@@ -118,7 +199,8 @@ post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
                                                     $block->{"originX"},
                                                     $block->{"originY"},
                                                     $new_project_id,
-                                                    $block->{auxfield}
+                                                    $block->{auxfield},
+                                                    $block->{enabled}
                                                  )->hash->{id};
         $id_map{$old_block_id} = $new_block_id;
     }
@@ -793,6 +875,8 @@ helper get_result_of_block_id => sub {
 
     # 3c. Define output path
     my $final_output_path = $CACHED_IMAGE_DIR->child($output_uuid . '.png');
+
+    return undef unless $block_info->{command};
 
     # 3d. Build the final command as a LIST of arguments to avoid shell injection/quoting issues.
     my @command_parts = (

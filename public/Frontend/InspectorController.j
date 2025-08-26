@@ -132,7 +132,7 @@
     // === Step 5: Place the staging view into the scroll view ===
     // Only now is the fully populated view added to the window's hierarchy.
     if (_stagingView) {
-        var view = [[CPView alloc] initWithFrame:CGRectMake(0, 0, 400, [_stagingView frame].size.height)];
+        var view = [[CPView alloc] initWithFrame:CGRectMake(0, 0, 400, [_stagingView frame].size.height + 30)];
         [view setAutoresizingMask:CPViewWidthSizable];
         [view setAutoresizesSubviews:YES];
         [view addSubview:_stagingView];

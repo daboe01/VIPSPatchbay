@@ -372,6 +372,9 @@ BaseURL=HostURL+"/";
 
         for(var i = 0; i < imagesIn.length; i++)
         {
+            if (!imagesIn[i]['url'])
+                continue;
+
             imagesOut.push([CPDictionary dictionaryWithObjects:[i, imagesIn[i]['url']] forKeys:["id", "url"]]);
         }
 
@@ -380,7 +383,15 @@ BaseURL=HostURL+"/";
     else if (aConnection == duplicateConnection)
     {
         [projectsController reloadRoot];
-        // fixme: select duplicate
+
+        // select the duplicate
+        var idToSelect = JSON.parse(aData)['pk'];
+
+        var newObjects = [[projectsController arrangedObjects] filteredArrayUsingPredicate:[CPPredicate predicateWithFormat:"id == %@", idToSelect + '']];
+
+        if ([newObjects count])
+            [projectsController setSelectedObjects:[ [newObjects objectAtIndex:0] ]];
+
         duplicateConnection = nil;
     }
 }

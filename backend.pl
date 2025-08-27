@@ -507,6 +507,7 @@ get '/VIPS/block/:block_id/image/:input_uuid' => [block_id => qr/\d+/, input_uui
     $self->get_result_of_block_id_p($block_id, $input_uuid)
         ->then(sub {
             my $result_uuid = shift;
+
             if ($result_uuid) {
                 my $image_file = $self->find_image_path_by_uuid($result_uuid);
                 if ($image_file && -e $image_file) {

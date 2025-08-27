@@ -500,23 +500,32 @@ get '/VIPS/block/:block_id/image' => [block_id => qr/\d+/i] => sub {
 
 get '/VIPS/block/:block_id/image/:input_uuid' => [block_id => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
+    $self->render_later;
     my $block_id = $self->param('block_id');
     my $input_uuid = $self->param('input_uuid');
 
-    my $result_uuid = $self->get_result_of_block_id($block_id, $input_uuid);
-
-    if ($result_uuid) {
-        my $image_file = $self->find_image_path_by_uuid($result_uuid);
-        if ($image_file && -e $image_file) {
-            return $self->reply->file($image_file);
-        }
-    }
-
-    return $self->render(status => 404, text => 'Image not found');
+    $self->get_result_of_block_id_p($block_id, $input_uuid)
+        ->then(sub {
+            my $result_uuid = shift;
+            if ($result_uuid) {
+                my $image_file = $self->find_image_path_by_uuid($result_uuid);
+                if ($image_file && -e $image_file) {
+                    return $self->reply->file($image_file->to_string);
+                }
+            }
+            $self->render(status => 404, text => 'Image not found');
+        })
+        ->catch(sub {
+            my $err = shift;
+            $self->app->log->error("Failed to get result for block $block_id: $err");
+            $self->render(status => 500, text => 'Image processing failed');
+        });
 };
 
 get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input_uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
+    $self->render_later;
+
     my $projectid = $self->param('projectid');
     my $input_uuid = $self->param('input_uuid');
 
@@ -525,52 +534,55 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
         return $self->render(status => 404, json => { error => "Output block not found for project $projectid" });
     }
 
-    warn Dumper $block;
-    my $result_uuid = $self->get_result_of_block_id($block->{id}, $input_uuid);
-    warn $result_uuid;
+    $self->get_result_of_block_id_p($block->{id}, $input_uuid)
+        ->then(sub {
+            my $result_uuid = shift;
+            unless ($result_uuid) {
+                return $self->render(status => 500, json => { error => "Pipeline execution failed for input $input_uuid." });
+            }
 
-    unless ($result_uuid) {
-        return $self->render(status => 500, json => { error => "Pipeline execution failed for input $input_uuid." });
-    }
+            my $image_file = $self->find_image_path_by_uuid($result_uuid);
+            unless ($image_file && -e $image_file) {
+                $self->app->log->error("Processing finished, but result file not found for UUID: $result_uuid");
+                return $self->render(status => 404, text => 'Result image not found on disk.');
+            }
 
-    my $image_file = $self->find_image_path_by_uuid($result_uuid);
+            # Asynchronously convert and send the image
+            my $promise = Mojo::Promise->new;
+            my $temp = File::Temp->new( SUFFIX => '.png', UNLINK => 1 );
+            my $temp_filename = $temp->filename;
+            my @cmd = ('vips', 'pngsave', $image_file->to_string, $temp_filename);
+            my $command_string = join(' ', @cmd) . ' 2>&1';
 
-    unless ($image_file && -e $image_file) {
-        $self->app->log->error("Processing finished, but result file not found for UUID: $result_uuid");
-        return $self->render(status => 404, text => 'Result image not found on disk.');
-    }
+            Mojo::IOLoop->subprocess(
+                sub { exec('sh', '-c', $command_string) },
+                sub {
+                    my ($subprocess, $err) = @_;
+                    if ($err || !-e $temp_filename || !-s $temp_filename) {
+                        $self->app->log->error("Failed to convert final image to PNG. VIPS said: " . ($err || 'unknown error'));
+                        $promise->reject("Failed to generate preview image.");
+                    } else {
+                        open(my $fh, '<:raw', $temp_filename) or $promise->reject("Could not open temp file for reading: $!");
+                        my $png_data;
+                        { local $/ = undef; $png_data = <$fh>; }
+                        close $fh;
+                        $promise->resolve($png_data);
+                    }
+                }
+            );
 
-    # 1. Create a temporary file object.
-    my $temp = File::Temp->new( SUFFIX => '.png', UNLINK => 1 );
-    my $temp_filename = $temp->filename;
-
-    # 2. Build the command to write to the temporary file.
-    my @cmd = ('vips', 'pngsave', $image_file->to_string, $temp_filename);
-
-    # 3. Execute the command.
-    my $error_output = `@cmd 2>&1`;
-
-    # 4. Check the exit status.
-    if ($? != 0) {
-        $self->app->log->error("Failed to convert final image to PNG. VIPS said: $error_output");
-        return $self->render(status => 500, text => "Failed to generate preview image.");
-    }
-
-    # 5. Read the binary data from the temp file.
-    open(my $fh, '<:raw', $temp_filename) or do {
-        $self->app->log->error("Could not open temp file '$temp_filename' for reading: $!");
-        return $self->render(status => 500, text => "Server error reading temporary image.");
-    };
-    my $png_data;
-    {
-        local $/ = undef; # Slurp mode
-        $png_data = <$fh>;
-    }
-    close $fh;
-
-    # 6. Send the image data to the browser.
-    $self->res->headers->content_type('image/png');
-    return $self->render(data => $png_data);
+            return $promise;
+        })
+        ->then(sub {
+            my $png_data = shift;
+            $self->res->headers->content_type('image/png');
+            $self->render(data => $png_data);
+        })
+        ->catch(sub {
+            my $error = shift;
+            $self->app->log->error("Error in image processing chain: $error");
+            $self->render(status => 500, text => $error || "An unknown error occurred.");
+        });
 };
 
 post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
@@ -725,16 +737,7 @@ del '/VIPS/:table/:pk/:key' => [key=>qr/\d+/] => sub
 # end: generic DBI interface
 #
 
-# DEPRECATED synchronous version. Kept for routes that have not been updated.
-helper get_result_of_block_id => sub {
-    my ($self, $id, $initial_input_uuid, $cache_dict) = @_;
-    my $promise = $self->get_result_of_block_id_p($id, $initial_input_uuid, $cache_dict);
-    # Block until the promise is resolved. Use with caution.
-    my ($result, $err);
-    $promise->then(sub { $result = shift })->catch(sub { $err = shift })->wait;
-    die "Async operation failed in sync wrapper: $err" if $err;
-    return $result;
-};
+
 
 # Asynchronous, promise-based version of the image processing helper
 helper get_result_of_block_id_p => sub {

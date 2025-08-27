@@ -798,6 +798,10 @@ helper get_result_of_block_id_p => sub {
         ->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
+    if ($block_info->{name} eq 'Label') {
+        return Mojo::Promise->resolve(undef);
+    }
+
     my @input_promises = map { $self->get_result_of_block_id_p($conn->{$_}, $initial_input_uuid, $cache_dict) } sort keys %$conn;
 
     return Mojo::Promise->all(@input_promises)->then(sub {

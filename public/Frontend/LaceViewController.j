@@ -124,43 +124,43 @@ BaseURL=HostURL+"/";
         }
     }
 
-    if ([[startHoles[0] valueForKey:"laces"] isKindOfClass:CPArray])
-        [startHoles[0] valueForKey:"laces"].push(myinput);
+    if ([[startHoles[0] valueForKey:@"laces"] isKindOfClass:CPArray])
+        [startHoles[0] valueForKey:@"laces"].push(myinput);
     else
-        [startHoles[0] setValue:[myinput] forKey:"laces"];
+        [startHoles[0] setValue:[myinput] forKey:@"laces"];
 
-    [myinput setValue:mydata2 forKey:"data"]
-    [startHoles[0] setValue:mydata forKey:"data"]
+    [myinput setValue:mydata2 forKey:@"data"]
+    [startHoles[0] setValue:mydata forKey:@"data"]
 }
 
 - (void)laceView:(EFLaceView)aView didConnectHole:(id)startHole toHole:(id)endHole
 {
-    var sourcePK = [[startHole valueForKey:"data"] valueForKey:'id']
-    var targetPK = [[endHole valueForKey:"data"] valueForKey:'id'];
-    var outletName = [endHole valueForKey:"label"];
+    var sourcePK = [[startHole valueForKey:@"data"] valueForKey:'id']
+    var targetPK = [[endHole valueForKey:@"data"] valueForKey:'id'];
+    var outletName = [endHole valueForKey:@"label"];
     var o = [_blocksController._entity objectWithPK:targetPK];
     var connString = [o valueForKey:'connections'];
     var conn = connString ? JSON.parse([o valueForKey:'connections']) : {};
     conn[outletName] = sourcePK;
-    [o setValue:JSON.stringify(conn) forKey:"connections"];
+    [o setValue:JSON.stringify(conn) forKey:@"connections"];
 }
 
 - (void)laceView:(EFLaceView)aView didUnconnectHole:(id)startHole fromHole:(id)endHole
 {
-    var targetPK = [[endHole valueForKey:"data"] valueForKey:'id'];
-    var outletName = [endHole valueForKey:"label"];
+    var targetPK = [[endHole valueForKey:@"data"] valueForKey:'id'];
+    var outletName = [endHole valueForKey:@"label"];
     var o = [_blocksController._entity objectWithPK:targetPK];
     var connString = [o valueForKey:'connections'];
 
     var conn = connString ? JSON.parse([o valueForKey:'connections']) : {};
     delete conn[outletName];
-    [o setValue:JSON.stringify(conn) forKey:"connections"];
+    [o setValue:JSON.stringify(conn) forKey:@"connections"];
 }
 
 - (void)laceView:(EFLaceView)aView showTooltipForHole:(id)aHole
 {
     // FIXME
-    // document.title = [aHole valueForKey:"label"]
+    // document.title = [aHole valueForKey:@"label"]
 }
 
 - (void)laceView:(EFLaceView)aView didDragBlockView:(EFView)aView
@@ -168,8 +168,8 @@ BaseURL=HostURL+"/";
     var data = [aView valueForKey:'data'];
     var point = [aView frame].origin;
     var o = [_blocksController._entity objectWithPK:[data valueForKey:'id']];
-    [o setValue:FLOOR(point.x) forKey:"originX"];
-    [o setValue:FLOOR(point.y) forKey:"originY"];
+    [o setValue:FLOOR(point.x) forKey:@"originX"];
+    [o setValue:FLOOR(point.y) forKey:@"originY"];
 }
 
 - (void)cancelEdit:(id)sender
@@ -180,7 +180,7 @@ BaseURL=HostURL+"/";
 - (void)popoverDidClose:(CPPopover)aPopover
 {
     // refresh gui for label only after settins are surely saved FIXME
-    if ([_screenController valueForKeyPath:"selection.is_label"] == '1')
+    if ([_screenController valueForKeyPath:@"selection.is_label"] == '1')
         setTimeout(function(){
             [_blocksController rearrangeObjects];
         }, 500)
@@ -198,7 +198,7 @@ BaseURL=HostURL+"/";
 {
 
     var pk = [aView valueForKeyPath:'data.id'];
-    var selectionArray = [[_blocksController arrangedObjects] filteredArrayUsingPredicate:[CPPredicate predicateWithFormat:"id = %@", pk + '']];
+    var selectionArray = [[_blocksController arrangedObjects] filteredArrayUsingPredicate:[CPPredicate predicateWithFormat:@"id = %@", pk + '']];
     var currentBlock = selectionArray[0];
     [currentBlock reload];
     [_blocksController setSelectedObjects:[currentBlock]];
@@ -218,18 +218,18 @@ BaseURL=HostURL+"/";
     var myViewController = [CPViewController new];
     [_editPopover setContentViewController:myViewController];
 
-    var gui_xml = [currentBlock valueForKeyPath:"block_type.gui_xml"];
+    var gui_xml = [currentBlock valueForKeyPath:@"block_type.gui_xml"];
 
     if ([gui_xml isKindOfClass:CPString])
     {
         gui_xml = [self _compileGUIXML:gui_xml rotatedResultsPrefix:'_settingsController'];
-        var cols = JSON.parse([currentBlock valueForKeyPath:"block_type.gui_fields"]);
+        var cols = JSON.parse([currentBlock valueForKeyPath:@"block_type.gui_fields"]);
         cols.push('id'); // primary key
 
         _settingsController._entity._columns = [CPSet setWithArray:cols];
         [_settingsController reload]
 
-        [CPBundle loadGSMarkupData:[CPData dataWithRawString:gui_xml] externalNameTable:[CPDictionary dictionaryWithObject:self forKey:"CPOwner"] localizableStringsTable:nil inBundle:nil tagMapping:nil];
+        [CPBundle loadGSMarkupData:[CPData dataWithRawString:gui_xml] externalNameTable:[CPDictionary dictionaryWithObject:self forKey:@"CPOwner"] localizableStringsTable:nil inBundle:nil tagMapping:nil];
 
         var mysize = CGSizeMake(300, 600)
         var view = [[CPView alloc] initWithFrame:CGRectMake(0, 0, mysize.width, mysize.height)];
@@ -272,7 +272,7 @@ BaseURL=HostURL+"/";
     {
         var currentBlockTemplate = selectedBlocks[i];
         var mydata = [CPConservativeDictionary new];
-        [mydata setValue:[CPApp._delegate.projectsController valueForKeyPath:"selection.id"] forKey:'idproject']; // fixme
+        [mydata setValue:[CPApp._delegate.projectsController valueForKeyPath:@"selection.id"] forKey:'idproject']; // fixme
         [mydata setValue:currentX forKey:'originX'];
         [mydata setValue:currentY forKey:'originY'];
         [mydata setValue:[currentBlockTemplate valueForKey:'id'] forKey:'idblock'];
@@ -310,7 +310,7 @@ BaseURL=HostURL+"/";
 - (id)blockForData:(id)o
 {
     var mydata = [CPConservativeDictionary new];
-    var title = [o valueForKeyPath:"block_type.display_name"];
+    var title = [o valueForKeyPath:@"block_type.display_name"];
 
     var x    = parseInt([o valueForKey:'originX'], 10)
     var y    = parseInt([o valueForKey:'originY'], 10)
@@ -419,22 +419,22 @@ BaseURL=HostURL+"/";
 {
     [_view setDelegate:self];
     _blocksController = blocksController;
-    [_blocksController addObserver:self forKeyPath:"arrangedObjects" options:nil context:nil];
+    [_blocksController addObserver:self forKeyPath:@"arrangedObjects" options:nil context:nil];
 }
 
 - (void)observeValueForKeyPath:(CPString)keyPath ofObject:(id)object change:(id)change context:(id)context
 {
     if (object == _blocksController)
     {
-        [_view unbind:"dataObjects"];
-        [_view unbind:"selectionIndexes"];
+        [_view unbind:@"dataObjects"];
+        [_view unbind:@"selectionIndexes"];
 
         _screenController = [CPArrayController new];
 
         [self setupBlocksView];
 
-        [_view bind:"selectionIndexes" toObject:_screenController withKeyPath:"selectionIndexes" options:nil]
-        [_view bind:"dataObjects"      toObject:_screenController withKeyPath:"arrangedObjects" options:nil]
+        [_view bind:@"selectionIndexes" toObject:_screenController withKeyPath:@"selectionIndexes" options:nil]
+        [_view bind:@"dataObjects"      toObject:_screenController withKeyPath:@"arrangedObjects" options:nil]
     }
 }
 

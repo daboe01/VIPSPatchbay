@@ -739,4 +739,11 @@ var _inoutputObservationContext = 1094;
     return CGSizeMake(result.width + 4, result.height + 4);
 }
 
+- (void)drawRect:(CGRect)rect
+{
+    var bounds = CGRectInset([self bounds], 4, 4);
+    var stringSize = [[self title] sizeWithAttributes:_stringAttributes];
+    [[CPColor blackColor] set];
+    [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:_stringAttributes];
+}
 @end

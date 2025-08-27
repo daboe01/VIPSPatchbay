@@ -68,11 +68,6 @@ width <- img_dims[1]
 height <- img_dims[2]
 
 cat("Image dimensions:", width, "x", height, "\n")
-if (options$smooth) {
-  cat(sprintf("Smoothing enabled with LOESS span = %.2f\n", options$span))
-} else {
-  cat("Smoothing option disabled. Background will be estimated using a linear trend.\n")
-}
 
 # --- Line-by-Line Gradient Removal ---
 

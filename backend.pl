@@ -3,7 +3,7 @@
 # Copyright 2025, All rights reserved.
 #
 
-use Mojolicious::Lite;
+use Mojolicious::Lite -signatures;
 use Mojo::Pg;
 use Data::Dumper;
 use Mojo::File;
@@ -18,6 +18,8 @@ use Data::UUID;
 use Cwd 'abs_path';
 use Fcntl qw(:flock); # For file locking to prevent race conditions
 use Text::ParseWords qw(shellwords);
+use Mojo::Promise;
+use Mojo::IOLoop;
 
 no warnings 'uninitialized';
 
@@ -89,6 +91,7 @@ helper find_image_path_by_uuid => sub {
 post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => sub {
     my $self = shift;
     my $idproject = $self->param('idproject');
+    $self->render_later; # Signal that the response will be sent asynchronously
 
     # 1. Expect an 'image' file in the form data.
     my $upload = $self->req->upload('image');
@@ -111,12 +114,11 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
         }
     });
 
-    # 2. Save the uploaded image to a temporary location in the image store with a unique UUID.
-    # This makes it compatible with the existing `get_result_of_block_id` helper.
+    # 2. Save the uploaded image to a temporary location
     my $ug = Data::UUID->new;
     my $temp_input_uuid = $ug->create_str();
     my ($name, $path, $ext) = fileparse($upload->filename, qr/\.[^.]*/);
-    $ext //= '.tmp'; # Ensure there's an extension.
+    $ext //= '.tmp';
     my $temp_input_filename = $temp_input_uuid . $ext;
     my $temp_input_path = $IMAGE_STORE_DIR->child($temp_input_filename);
     $upload->move_to($temp_input_path);
@@ -124,48 +126,50 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
 
     # 3. Find the final output block for the project.
     my $output_block = $self->pg->db->query(
-                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
-                                                $idproject
-                                            )->hash;
+        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+        $idproject
+    )->hash;
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $idproject." });
     }
 
-    # 4. Execute the pipeline using the existing helper.
-    # The memoization cache will collect the UUIDs of all intermediate files created.
+    # 4. Execute the pipeline asynchronously.
     my %processing_cache;
-    my $final_output_uuid = $self->get_result_of_block_id($output_block->{id}, $temp_input_uuid, \%processing_cache);
+    $self->get_result_of_block_id_p($output_block->{id}, $temp_input_uuid, \%processing_cache)
+    ->then(sub {
+        my $final_output_uuid = shift;
 
-    # Add all generated intermediate/cached files to our cleanup list.
-    for my $generated_uuid (values %processing_cache) {
-        my $file_path = $self->find_image_path_by_uuid($generated_uuid);
-        push @temp_files_to_delete, $file_path if $file_path;
-    }
+        # Add all generated intermediate/cached files to our cleanup list.
+        for my $generated_uuid (values %processing_cache) {
+            my $file_path = $self->find_image_path_by_uuid($generated_uuid);
+            push @temp_files_to_delete, $file_path if $file_path;
+        }
 
-    unless ($final_output_uuid) {
-        return $self->render(status => 500, json => { error => "Stateless image processing pipeline failed to produce an output." });
-    }
+        my $final_image_path = $self->find_image_path_by_uuid($final_output_uuid);
+        unless ($final_image_path && -e $final_image_path) {
+            $self->app->log->error("Processing finished, but final file for UUID $final_output_uuid is missing.");
+            return $self->render(status => 500, json => { error => "Pipeline execution failed to produce a file." });
+        }
 
-    my $final_image_path = $self->find_image_path_by_uuid($final_output_uuid);
-    unless ($final_image_path && -e $final_image_path) {
-        $self->app->log->error("Processing finished, but final file for UUID $final_output_uuid is missing.");
-        return $self->render(status => 500, json => { error => "Pipeline execution failed to produce a file." });
-    }
+        # 5. Read the final image data.
+        my $image_data = eval { $final_image_path->slurp };
+        if ($@) {
+            $self->app->log->error("Could not read final image file '$final_image_path': $@");
+            return $self->render(status => 500, text => "Server error reading final image.");
+        }
 
-    # 5. Read the final image data from its temporary cached location.
-    my $image_data = eval { $final_image_path->slurp };
-    if ($@) {
-        $self->app->log->error("Could not read final image file '$final_image_path': $@");
-        return $self->render(status => 500, text => "Server error reading final image.");
-    }
-
-    # 6. Send the raw image data as the response.
-    # The helper always saves as PNG, so we set the content type accordingly.
-    $self->res->headers->content_type('image/png');
-
-    return $self->render(data => $image_data);
+        # 6. Send the raw image data as the response.
+        $self->res->headers->content_type('image/png');
+        $self->render(data => $image_data);
+    })
+    ->catch(sub {
+        my $error = shift;
+        $self->app->log->error("Stateless image processing pipeline failed: $error");
+        $self->render(status => 500, json => { error => "Stateless image processing pipeline failed to produce an output." });
+    });
 };
+
 
 post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
 {
@@ -408,6 +412,8 @@ get '/VIPS/output_images/:input_uuid' => [input_uuid => qr/[0-9a-f\-]+/i] => sub
 
 post '/VIPS/run' => sub {
     my $self = shift;
+    $self->render_later; # Asynchronous response
+
     my $json_body = $self->req->json;
     my $idproject = $json_body->{idproject};
     my $input_uuid = $json_body->{input_uuid}; # Frontend now sends the selected UUID
@@ -415,14 +421,18 @@ post '/VIPS/run' => sub {
     my $block = $self->pg->db->query('select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null', $idproject)->hash;
 
     # The input to the graph is now a UUID
-    my $result_uuid = $self->get_result_of_block_id($block->{id}, $input_uuid);
-
-    if ($result_uuid) {
-        $self->render(json => { result_uuid => $result_uuid, url => "/VIPS/preview/$result_uuid" });
-    } else {
-        $self->render(status => 500, json => { error => "Pipeline execution failed." });
-    }
+    $self->get_result_of_block_id_p($block->{id}, $input_uuid)
+        ->then(sub {
+            my $result_uuid = shift;
+            $self->render(json => { result_uuid => $result_uuid, url => "/VIPS/preview/$result_uuid" });
+        })
+        ->catch(sub {
+            my $err = shift;
+            app->log->error("Pipeline execution failed: $err");
+            $self->render(status => 500, json => { error => "Pipeline execution failed." });
+        });
 };
+
 
 # for the image block inspector
 get '/VIPS/block/:block_id/image' => [block_id => qr/\d+/i] => sub {
@@ -567,51 +577,47 @@ post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
     my $self = shift;
     my $projectid = $self->param('projectid');
     my $json_body = $self->req->json;
+    $self->render_later; # Asynchronous response
 
-    # Expect a JSON array of input UUIDs, e.g., { "input_uuids": ["uuid1", "uuid2", ...] }
     my $input_uuids = $json_body->{input_uuids};
 
     unless ($input_uuids && ref $input_uuids eq 'ARRAY') {
         return $self->render(status => 400, json => { error => "Missing or invalid 'input_uuids' array in request body." });
     }
 
-    # Find the final output block for the given project
     my $output_block = $self->pg->db->query(
-                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
-                                                $projectid
-                                            )->hash;
+        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+        $projectid
+    )->hash;
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $projectid" });
     }
     my $output_block_id = $output_block->{id};
 
-    my @outputs;
-    my %cache_dict; # Memoization cache for the duration of this request
+    my %cache_dict; # Memoization cache for this request
+    my @promises = map {
+        my $input_uuid = $_;
+        $self->get_result_of_block_id_p($output_block_id, $input_uuid, \%cache_dict)
+            ->then(sub {
+                my $result_uuid = shift;
+                return { input_uuid => $input_uuid, output_uuid => $result_uuid, url => "/VIPS/preview/$result_uuid" };
+            })
+            ->catch(sub {
+                my $err = shift;
+                $self->app->log->error("Could not generate output for project $projectid with input $input_uuid: $err");
+                return { input_uuid => $input_uuid, output_uuid => undef, error => "Pipeline execution failed for this input." };
+            })
+    } @$input_uuids;
 
-    for my $input_uuid (@$input_uuids) {
-        # Use the existing helper to trace the pipeline for each input UUID
-        my $result_uuid = $self->get_result_of_block_id($output_block_id, $input_uuid, \%cache_dict);
-
-        if ($result_uuid) {
-            push @outputs, {
-                input_uuid => $input_uuid,
-                output_uuid => $result_uuid,
-                url => "/VIPS/preview/$result_uuid" # Use the standard preview route
-            };
-        } else {
-            # If a pipeline fails for one UUID, note it and continue
-            push @outputs, {
-                input_uuid => $input_uuid,
-                output_uuid => undef,
-                error => "Pipeline execution failed for this input."
-            };
-            $self->app->log->error("Could not generate output for project $projectid with input $input_uuid");
-        }
-    }
-
-    # The response is now an array of objects, preserving the order of the input_uuids
-    $self->render(json => \@outputs);
+    Mojo::Promise->all(@promises)->then(sub {
+        my @outputs = map { $_->[0] } @_;
+        $self->render(json => \@outputs);
+    })->catch(sub {
+        # This catch is for failures in Mojo::Promise->all itself, which is unlikely here.
+        my $err = shift;
+        $self->render(status => 500, json => { error => "An unexpected error occurred during batch processing: $err" });
+    });
 };
 
 
@@ -719,13 +725,24 @@ del '/VIPS/:table/:pk/:key' => [key=>qr/\d+/] => sub
 # end: generic DBI interface
 #
 
+# DEPRECATED synchronous version. Kept for routes that have not been updated.
 helper get_result_of_block_id => sub {
     my ($self, $id, $initial_input_uuid, $cache_dict) = @_;
-    $cache_dict //= {}; # Memoization for recursive calls within a single run
+    my $promise = $self->get_result_of_block_id_p($id, $initial_input_uuid, $cache_dict);
+    # Block until the promise is resolved. Use with caution.
+    my ($result, $err);
+    $promise->then(sub { $result = shift })->catch(sub { $err = shift })->wait;
+    die "Async operation failed in sync wrapper: $err" if $err;
+    return $result;
+};
 
-    # We create a composite key from the block ID and the initial input UUID.
+# Asynchronous, promise-based version of the image processing helper
+helper get_result_of_block_id_p => sub {
+    my ($self, $id, $initial_input_uuid, $cache_dict) = @_;
+    $cache_dict //= {};
+
     my $cache_key = "$id:$initial_input_uuid";
-    return $cache_dict->{$cache_key} if exists $cache_dict->{$cache_key};
+    return Mojo::Promise->resolve($cache_dict->{$cache_key}) if exists $cache_dict->{$cache_key};
 
     my $block_info = $self->pg->db->query(q{
                                                 SELECT
@@ -742,191 +759,170 @@ helper get_result_of_block_id => sub {
                                                 WHERE b.id = ?
                                             }, $id)->hash;
 
-    my $conn     = decode_json($block_info->{connections} || '{}');
+
+    my $conn = decode_json($block_info->{connections} || '{}');
     my $settings = decode_json($block_info->{output_value} || '{}');
     $block_info->{parameter_mappings} = decode_json($block_info->{parameter_mappings} || '{}');
 
-    # --- Handle disabled blocks ---
     if (defined $block_info->{enabled} && $block_info->{enabled} == 0) {
-        app->log->debug("Block $id is disabled. Passing through input.");
         my @input_keys = keys %$conn;
-        if (@input_keys == 0) {
-            app->log->warn("Disabled block $id has no inputs and will produce no output.");
-            return $cache_dict->{$cache_key} = undef;
-        }
-        # Pass through the first input's result.
+        return Mojo::Promise->resolve(undef) if @input_keys == 0;
         my $input_block_id = $conn->{(sort keys %$conn)[0]};
-        # Use the modified cache key for writes
-        return $cache_dict->{$cache_key} = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
+        return $self->get_result_of_block_id_p($input_block_id, $initial_input_uuid, $cache_dict)
+        ->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
-    # --- Handle special, non-command blocks first ---
     if ($block_info->{name} eq 'Input') {
-        return $cache_dict->{$cache_key} = $initial_input_uuid;
+        return Mojo::Promise->resolve($initial_input_uuid)->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
     if ($block_info->{name} eq 'Load Image') {
         my $filename = $settings->{filename};
         my $res = $self->pg->db->query('SELECT uuid FROM input_images WHERE original_filename = ?', $filename)->hash;
-        return $cache_dict->{$cache_key} = $res->{uuid};
+        return Mojo::Promise->resolve($res->{uuid})->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
     if ($block_info->{name} eq 'Image Preview') {
         app->log->debug("Handling Image Preview block $id. Passing through input.");
         my @input_keys = keys %$conn;
         if (@input_keys != 1) {
-            app->log->error("Image Preview block $id has " . scalar(@input_keys) . " inputs, but expected 1.");
-            return undef;
+            my $msg = "Image Preview block $id has " . scalar(@input_keys) . " inputs, but expected 1.";
+            app->log->error($msg);
+            return Mojo::Promise->reject($msg);
         }
         my $input_block_id = $conn->{$input_keys[0]};
-        my $input_uuid = $self->get_result_of_block_id($input_block_id, $initial_input_uuid, $cache_dict);
-        return $cache_dict->{$cache_key} = $input_uuid;
+        return $self->get_result_of_block_id_p($input_block_id, $initial_input_uuid, $cache_dict)
+        ->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
-    # --- General Command Execution Logic ---
+    my @input_promises = map { $self->get_result_of_block_id_p($conn->{$_}, $initial_input_uuid, $cache_dict) } sort keys %$conn;
 
-    # 1. Resolve inputs by recursively calling this helper
-    my @input_uuids;
-    for my $key (sort keys %$conn) {
-        my $input_uuid = $self->get_result_of_block_id($conn->{$key}, $initial_input_uuid, $cache_dict);
-        return undef unless $input_uuid;
-        push @input_uuids, $input_uuid;
-    }
+    return Mojo::Promise->all(@input_promises)->then(sub {
+        my @input_uuids = map { $_->[0] } @_;
+        return Mojo::Promise->reject("Missing input UUID") if grep { !defined } @input_uuids;
 
-    # 2. Check for cached result
-    my $params_json = encode_json($settings);
-    my $inputs_json = encode_json(\@input_uuids);
+        my $params_json = encode_json($settings);
+        my $inputs_json = encode_json(\@input_uuids);
 
-    my $cached = $self->pg->db->query(
-                                        'SELECT uuid FROM image_cache WHERE idblock = ? AND parameters_json = ? AND input_uuids_json = ?',
-                                        $id, $params_json, $inputs_json
-                                        )->hash;
+        my $cached = $self->pg->db->query('SELECT uuid FROM image_cache WHERE idblock = ? AND parameters_json = ? AND input_uuids_json = ?', $id, $params_json, $inputs_json)->hash;
+        if ($cached) {
+            my $cached_uuid = $cached->{uuid};
+            my $cached_file = $self->find_image_path_by_uuid($cached_uuid);
 
-    if ($cached) {
-        my $cached_uuid = $cached->{uuid};
-        my $cached_file = $self->find_image_path_by_uuid($cached_uuid);
-
-        if ($cached_file && -e $cached_file) {
-            app->log->debug("Cache HIT for block $id (file verified)");
-            return $cache_dict->{$cache_key} = $cached_uuid;
+            if ($cached_file && -e $cached_file) {
+                app->log->debug("Cache HIT for block $id (file verified)");
+                return Mojo::Promise->resolve($cached_uuid);
+            }
+            else {
+                app->log->warn("STALE CACHE: Hit for block $id, but file for UUID '$cached_uuid' is missing. Deleting entry and reprocessing.");
+                $self->pg->db->query('DELETE FROM image_cache WHERE uuid = ?', $cached_uuid);
+            }
         }
-        else {
-            app->log->warn("STALE CACHE: Hit for block $id, but file for UUID '$cached_uuid' is missing. Deleting entry and reprocessing.");
-            $self->pg->db->query('DELETE FROM image_cache WHERE uuid = ?', $cached_uuid);
+        app->log->debug("Cache MISS for block $id");
+
+        my $promise = Mojo::Promise->new;
+        my $ug = Data::UUID->new;
+        my $output_uuid = $ug->create_str();
+
+        my %mapped_settings;
+        for my $key (keys %$settings) {
+            my $value = $settings->{$key};
+            $mapped_settings{$key} = $block_info->{parameter_mappings}->{$key}->{$value} // $value;
         }
-    }
-    app->log->debug("Cache MISS for block $id");
+        my $param_template = $block_info->{parameter_template} || '';
+        my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
+        my @param_values;
+        for my $key (@all_gui_fields) {
+            push @param_values, $mapped_settings{$key} // '';
+        }
+        my @positional_param_values;
+        my @templated_args;
 
-    # 3. Cache Miss: Prepare and execute the command
-    my $ug = Data::UUID->new;
-    my $output_uuid = $ug->create_str();
-
-    # 3a. Build parameter lists
-    my %mapped_settings;
-    for my $key (keys %$settings) {
-        my $value = $settings->{$key};
-        $mapped_settings{$key} = $block_info->{parameter_mappings}->{$key}->{$value} // $value;
-    }
-    my $param_template = $block_info->{parameter_template} || '';
-    my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
-
-    my @param_values;
-    for my $key (@all_gui_fields) {
-        push @param_values, $mapped_settings{$key} // '';
-    }
-
-    my @positional_param_values;
-    my @templated_args;
-
-    if ($param_template) {
-        my $num_template_params = () = $param_template =~ /%[sd]/g;
-        my $num_total_params    = @param_values;
-        my $num_positional_params = $num_total_params - $num_template_params;
-
-        if ($num_positional_params < 0) {
-            app->log->error("Configuration error for block $id ('$block_info->{name}'): The parameter_template has more placeholders ($num_template_params) than available gui_fields ($num_total_params).");
-            return undef;
+        if ($param_template) {
+            my $num_template_params = () = $param_template =~ /%[sd]/g;
+            my $num_total_params    = @param_values;
+            my $num_positional_params = $num_total_params - $num_template_params;
+            if ($num_positional_params < 0) { return $promise->reject("Configuration error for block $id") }
+            if ($num_positional_params > 0) { @positional_param_values = @param_values[0 .. $num_positional_params - 1] }
+            my @template_values = @param_values[$num_positional_params .. $#param_values];
+            my $formatted_template_string = sprintf($param_template, @template_values);
+            @templated_args = shellwords($formatted_template_string);
+        } else {
+            @positional_param_values = @param_values;
         }
 
-        if ($num_positional_params > 0) {
-            @positional_param_values = @param_values[0 .. $num_positional_params - 1];
+        my @input_file_paths;
+        for my $input_uuid (@input_uuids) {
+            my $input_file = $self->find_image_path_by_uuid($input_uuid);
+            unless ($input_file && -e $input_file) {
+                return $promise->reject("Input file for UUID $input_uuid not found for block $id");
+            }
+            push @input_file_paths, $input_file->to_string;
         }
 
-        my @template_values = @param_values[$num_positional_params .. $#param_values];
-        my $formatted_template_string = sprintf($param_template, @template_values);
+        my $final_output_path = $CACHED_IMAGE_DIR->child($output_uuid . '.png');
+        return $promise->reject("Command not defined for block $id") unless $block_info->{command};
 
-        # Use shellwords to correctly parse the template string into a list of arguments
-        @templated_args = shellwords($formatted_template_string);
+        my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path->to_string, @positional_param_values, @templated_args);
+        @command_parts = grep { defined && $_ ne '' } @command_parts;
 
-    } else {
-        @positional_param_values = @param_values;
-    }
+        # --- ROBUST COMMAND EXECUTION ---
+        # 1. Quote arguments for safe execution within a shell.
+        my $command_string = join ' ', map {
+            my $arg = $_;
+            # A simple but effective quoting for most cases.
+            $arg =~ s/'/'\\''/g;
+            "'$arg'";
+        } @command_parts;
 
-    # 3b. Resolve input UUIDs to full file paths
-    my @input_file_paths;
-    for my $input_uuid (@input_uuids) {
-        my $input_file = $self->find_image_path_by_uuid($input_uuid);
-        unless ($input_file && -e $input_file) {
-            app->log->error("Processing error: Input file for UUID $input_uuid not found for block $id");
-            return undef;
+        # 2. Add shell redirection to merge stderr into stdout.
+        $command_string .= ' 2>&1';
+        app->log->debug("Executing shell command: sh -c \"$command_string\"");
+
+        my $output_buffer = '';
+        my $subprocess = Mojo::IOLoop->subprocess(
+        sub {
+            # 3. Execute the command string via the shell.
+            exec('sh', '-c', $command_string);
+        },
+        sub {
+            my ($subprocess, $err) = @_;
+
+            # SUCCESS CONDITION: The primary check is for a valid, non-empty output file.
+            # This is more reliable than the $err variable, which can be misleading in
+            # complex async environments.
+            if (-e $final_output_path && -s $final_output_path) {
+                # Success! The file was created.
+                $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
+                $promise->resolve($output_uuid);
+            } else {
+                # FAILURE CONDITION: The file was not created or is empty.
+                app->log->error("Command execution failed for: $command_string");
+
+                # Now, provide more specific details about the failure.
+                if ($err) {
+                    app->log->error("Subprocess reported an error argument: $err");
+                } else {
+                    app->log->error("Output file was not created or is empty after command execution.");
+                }
+                app->log->error("Combined Output (stdout/stderr): $output_buffer");
+
+                # Clean up the potentially empty file.
+                unlink $final_output_path->to_string if -e $final_output_path;
+
+                $promise->reject("Command execution failed");
+            }
         }
-        push @input_file_paths, $input_file->to_string;
-    }
+        );
 
-    # 3c. Define output path
-    my $final_output_path = $CACHED_IMAGE_DIR->child($output_uuid . '.png');
+        # All output is now on stdout, so we only need to listen to that.
+        $subprocess->on(stdout => sub { my ($subprocess, $chunk) = @_; $output_buffer .= $chunk; });
 
-    return undef unless $block_info->{command};
-
-    # 3d. Build the final command as a LIST of arguments to avoid shell injection/quoting issues.
-    my @command_parts = (
-        $block_info->{command},
-        $block_info->{name},
-        @input_file_paths,
-        $final_output_path->to_string,
-        @positional_param_values,
-        @templated_args
-    );
-    @command_parts = grep { defined && $_ ne '' } @command_parts;
-
-    # 3e. Execute the command safely using a pipe that captures both stdout and stderr.
-    app->log->debug("Executing command array: " . join(', ', map { "'$_'" } @command_parts));
-
-    my $pid = open(my $cmd_fh, '-|');
-    die "Cannot fork to run command: $!" unless defined $pid;
-
-    my $output = '';
-    my $exit_code;
-
-    if ($pid == 0) {
-        # --- CHILD PROCESS ---
-        # Redirect our STDERR to STDOUT so the parent can read both from one handle
-        open STDERR, '>&', STDOUT or die "Can't redirect child STDERR: $!";
-        # Execute the command. The list form is critical for security.
-        exec(@command_parts) or die "Can't exec command '$command_parts[0]': $!";
-    } else {
-        # --- PARENT PROCESS ---
-        # Read all output from the child process
-        {
-            local $/;
-            $output = <$cmd_fh>;
-        }
-        close($cmd_fh);
-        $exit_code = $?;
-    }
-
-    # 4. Check for success by looking at the exit code and the final file.
-    if ($exit_code != 0 || !-e $final_output_path) {
-        app->log->error("Command failed: " . join(' ', @command_parts));
-        app->log->error("Output: $output");
-        unlink $final_output_path->to_string if -e $final_output_path;
-        return undef;
-    }
-
-    # 5. Store result in cache
-    $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
-
-    return $cache_dict->{$cache_key} = $output_uuid;
+        return $promise;
+    })->then(sub {
+        $cache_dict->{$cache_key} = $_[0];
+        return $_[0];
+    });
 };
 
 ###################################################################

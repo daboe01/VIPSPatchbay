@@ -126,9 +126,9 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
 
     # 3. Find the final output block for the project.
     my $output_block = $self->pg->db->query(
-        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
-        $idproject
-    )->hash;
+                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+                                                $idproject
+                                            )->hash;
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $idproject." });
@@ -169,7 +169,6 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
         $self->render(status => 500, json => { error => "Stateless image processing pipeline failed to produce an output." });
     });
 };
-
 
 post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
 {

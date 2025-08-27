@@ -734,9 +734,9 @@ var _inoutputObservationContext = 1094;
 
 - (CPSize)minimalSize
 {
-    var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:12] : [CPFont systemFontOfSize:12]};
+    var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:14] : [CPFont systemFontOfSize:14]};
     var result =  [[self title] sizeWithAttributes:attributes];
-    return CGSizeMake(result.width + 4, result.height + 4);
+    return CGSizeMake(result.width + 8, result.height + 8);
 }
 
 - (void)drawRect:(CGRect)rect
@@ -744,6 +744,9 @@ var _inoutputObservationContext = 1094;
     var bounds = CGRectInset([self bounds], 4, 4);
     var stringSize = [[self title] sizeWithAttributes:_stringAttributes];
     [[CPColor blackColor] set];
-    [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:_stringAttributes];
+
+    var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:14] : [CPFont systemFontOfSize:14]};
+
+    [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:attributes];
 }
 @end

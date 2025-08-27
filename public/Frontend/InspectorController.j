@@ -189,8 +189,8 @@
         }
     }
 
-    // [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved."];
-    // rerun to give user feedback
+    [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved. Images will be reprocessed now and should update soon."];
+
     [CPApp._delegate run:nil];
 }
 

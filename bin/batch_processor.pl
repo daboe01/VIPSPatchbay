@@ -8,7 +8,7 @@ use Mojo::File qw(path);
 use Pod::Usage qw(pod2usage);
 
 # --- Configuration ---
-my $SERVER_URL_BASE = 'http://localhost:3036';
+my $SERVER_URL_BASE = 'http://localhost:3000';
 # --- End Configuration ---
 
 # --- Command-line argument parsing ---

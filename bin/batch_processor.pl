@@ -33,15 +33,12 @@ unless ($input_dir_str && $project_id) {
 }
 
 my $input_dir = path($input_dir_str);
-unless ($input_dir->is_dir) {
-    die "Error: Input directory '$input_dir' does not exist or is not a directory.\n";
-}
 
 # If no output directory is specified, use the input directory.
 my $output_dir = $output_dir_str ? path($output_dir_str) : $input_dir;
 
 # Create the output directory if it doesn't exist.
-$output_dir->make_path unless $output_dir->is_dir;
+$output_dir->make_path unless -e $output_dir;
 print "Results will be saved in: $output_dir\n";
 
 

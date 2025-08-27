@@ -721,6 +721,24 @@ post '/VIPS/:table/:pk'=> sub
 
     my $id = $self->pg->db->insert($table, $u, {returning => $self->param('pk')})->hash->{id};
 
+    if ($table eq 'projects') {
+        # Add default input block
+        $self->pg->db->insert('blocks', {
+            idproject => $id,
+            idblock => 17,
+            originX => 100,
+            originY => 100
+        });
+
+        # Add default output block
+        $self->pg->db->insert('blocks', {
+            idproject => $id,
+            idblock => 109,
+            originX => 400,
+            originY => 100
+        });
+    }
+
     $self->render(json => {err => $DBI::errstr, pk => $id});
 };
 

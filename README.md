@@ -106,4 +106,4 @@ And that's it. The backend now has all the information it needs to dynamically b
 *   **Frontend:** **[Cappuccino](https://www.cappuccino.dev/)** Framework, JavaScript, HTML5
 *   **Backend:** **[Mojolicious::Lite](https://mojolicious.org/)** (Perl)
 *   **Database:** PostgreSQL
-*   **Image Processing Engines:** `libvips`, `ImageMagick`, `R` (`EBImage`), `Python 3` (`ultralytics`)
+*   **Image Processing Engines:** `libvips`, `ImageMagick`, `R` (`EBImage`), `Python 3` (`YOLOv8`)

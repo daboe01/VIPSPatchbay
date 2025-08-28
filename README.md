@@ -1,7 +1,3 @@
-Excellent. Here is the updated `readme.md`. This version provides a deep dive into the GUI extensibility, removes the final execution step to keep the focus on configuration, and integrates ImageMagick as a prime example of the system's flexibility.
-
----
-
 # PatchbayVIPS
 
 **A Desktop-Class Visual Programming Environment for High-Performance Image Analysis, right in your browser.**

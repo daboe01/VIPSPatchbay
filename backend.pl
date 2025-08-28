@@ -126,7 +126,9 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
 
     # 3. Find the final output block for the project.
     my $output_block = $self->pg->db->query(
-                                                'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+                                            q{
+                                                SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
+                                             },
                                                 $idproject
                                             )->hash;
 
@@ -417,7 +419,9 @@ post '/VIPS/run' => sub {
     my $idproject = $json_body->{idproject};
     my $input_uuid = $json_body->{input_uuid}; # Frontend now sends the selected UUID
 
-    my $block = $self->pg->db->query('select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null', $idproject)->hash;
+    my $block = $self->pg->db->query(q{
+                                        select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null and bc.name not in ('Label')
+                                      }, $idproject)->hash;
 
     # The input to the graph is now a UUID
     $self->get_result_of_block_id_p($block->{id}, $input_uuid)
@@ -529,7 +533,7 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
     my $projectid = $self->param('projectid');
     my $input_uuid = $self->param('input_uuid');
 
-    my $block = $self->pg->db->query('select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null', $projectid)->hash;
+    my $block = $self->pg->db->query(q{select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null and blocks_catalogue.name not in ('Label')}, $projectid)->hash;
     unless ($block && $block->{id}) {
         return $self->render(status => 404, json => { error => "Output block not found for project $projectid" });
     }
@@ -598,7 +602,9 @@ post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
     }
 
     my $output_block = $self->pg->db->query(
-        'SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL',
+                                                q{
+                                                    SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
+                                                },
         $projectid
     )->hash;
 
@@ -670,7 +676,13 @@ get '/VIPS/settings/id/:key' => [key => qr/[a-z0-9\s\-_\.]+/i] => sub
     my $block = $self->pg->db->query(q{select output_value, gui_fields from blocks join blocks_catalogue on idblock = blocks_catalogue.id where blocks.id = ?}, $id)->hash;
     $block->{output_value} = '{}' unless $block->{output_value};
 
-    my $out = $block->{gui_fields} ? decode_json($block->{output_value}) : {};
+    my $out;
+    if ($block->{gui_fields}) {
+        eval { $out = decode_json($block->{output_value}); };
+        $out = {} if $@ || ref $out ne 'HASH';
+    } else {
+        $out = {};
+    }
     $out->{id} = $id;
     $self->render(json => [$out]);
 };
@@ -681,7 +693,9 @@ put '/VIPS/settings/id/:key' => [key => qr/[a-z0-9\s\-_\.]+/i] => sub
     my $id = $self->param('key');
     my $block = $self->pg->db->query(q{select output_value, gui_fields from blocks join blocks_catalogue on idblock = blocks_catalogue.id where blocks.id = ?}, $id)->hash;
     $block->{output_value} = '{}' unless $block->{output_value};
-    my $out = decode_json($block->{output_value});
+    my $out;
+    eval { $out = decode_json($block->{output_value}); };
+    $out = {} if $@ || ref $out ne 'HASH';
     my $patch = $self->req->json;
 
     foreach my $key (keys %{$patch})
@@ -780,9 +794,10 @@ helper get_result_of_block_id_p => sub {
                                                 WHERE b.id = ?
                                             }, $id)->hash;
 
-
     my $conn = decode_json($block_info->{connections} || '{}');
-    my $settings = decode_json($block_info->{output_value} || '{}');
+    my $settings;
+    eval { $settings = decode_json($block_info->{output_value} || '{}'); };
+    $settings = {} if $@ || ref $settings ne 'HASH';
     $block_info->{parameter_mappings} = decode_json($block_info->{parameter_mappings} || '{}');
 
     if (defined $block_info->{enabled} && $block_info->{enabled} == 0) {
@@ -816,8 +831,45 @@ helper get_result_of_block_id_p => sub {
         ->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
-    if ($block_info->{name} eq 'Label') {
-        return Mojo::Promise->resolve(undef);
+    if ($block_info->{name} eq 'Exec Block') { # Special block for sub-project execution
+        my $sub_project_name = $block_info->{output_value};
+        unless ($sub_project_name) {
+            return Mojo::Promise->reject("Sub-project block $id does not have a project name in auxfield.");
+        }
+
+        # Find the sub-project's ID from its name.
+        my $sub_project = $self->pg->db->query('SELECT id FROM projects WHERE name = ?', $sub_project_name)->hash;
+        unless ($sub_project && $sub_project->{id}) {
+            return Mojo::Promise->reject("Sub-project named '$sub_project_name' not found.");
+        }
+        my $sub_project_id = $sub_project->{id};
+
+        # Find the final output block of the sub-project.
+        my $output_block = $self->pg->db->query(
+                                                    q{
+                                                        SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
+                                                    },
+            $sub_project_id
+        )->hash;
+
+        unless ($output_block && $output_block->{id}) {
+            return Mojo::Promise->reject("Final output block not found for sub-project '$sub_project_name'.");
+        }
+
+        my @input_keys = keys %$conn;
+        if (@input_keys != 1) {
+            return Mojo::Promise->reject("Sub-project block $id must have exactly one input.");
+        }
+        my $input_block_id = $conn->{$input_keys[0]};
+
+        # Get the output of the connected input block
+        return $self->get_result_of_block_id_p($input_block_id, $initial_input_uuid, $cache_dict)
+            ->then(sub {
+                my $sub_project_input_uuid = shift;
+                # Now execute the sub-project with this UUID as its input.
+                # Use a fresh cache for the sub-project to avoid conflicts.
+                return $self->get_result_of_block_id_p($output_block->{id}, $sub_project_input_uuid, {});
+            })->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
     my @input_promises = map { $self->get_result_of_block_id_p($conn->{$_}, $initial_input_uuid, $cache_dict) } sort keys %$conn;

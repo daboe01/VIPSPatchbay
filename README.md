@@ -1,57 +1,57 @@
 # PatchbayVIPS
 
-**Visually build, inspect, and run complex image processing pipelines right in your browser.**
+**A Desktop-Class Visual Programming Environment for High-Performance Image Analysis, right in your browser.**
 
-PatchbayVIPS is a powerful, web-based visual programming environment designed for rapid prototyping and execution of image analysis and computer vision workflows. It combines an intuitive node-graph interface with a high-performance backend that orchestrates calls to `libvips`, `R`, and `Python`, giving you the best of all worlds.
+PatchbayVIPS is a professional-grade, web-based tool for designing, inspecting, and executing complex image processing pipelines. It delivers a fluid, desktop-application experience by combining a sophisticated **Cappuccino** frontend with a powerful, asynchronous **Mojolicious** backend.
+
+Visually orchestrate operations from best-in-class libraries like `libvips`, `EBImage (R)`, and `YOLOv8 (Python)` without writing a single line of glue code.
 
 <img width="1300" height="920" alt="screenshot" src="https://github.com/user-attachments/assets/f1325327-1a50-41e2-a12c-cbf9bade6311" />
 
-## Core Concepts
+## The Philosophy: Power Meets Usability
 
-Say goodbye to writing and rewriting tedious scripts. With PatchbayVIPS, you build your image processing logic by placing and connecting operator nodes on a canvas. Each node represents a specific operation (e.g., blur, threshold, object detection), and its parameters can be tweaked in real-time from the Inspector panel.
+PatchbayVIPS is built on the principle that powerful tools should not be complicated to use. It achieves this by seamlessly integrating three key pillars:
 
-The flow is simple:
-1.  **Load** an input image.
-2.  **Add** operators from the library.
-3.  **Connect** them to define the processing pipeline.
-4.  **Inspect** the output of any node along the way.
-5.  **Run** the full pipeline to get your final result.
+1.  **A Rich Frontend:** A responsive, zero-compromise user interface that feels like a native desktop application.
+2.  **An Intelligent Backend:** An asynchronous, non-blocking engine that manages complex workflows, caching, and execution with unparalleled efficiency.
+3.  **Limitless Extensibility:** A framework designed from the ground up to be easily extended with your own custom scripts and tools.
 
 ## Key Features
 
-*   **Visual Pipeline Editor:** An intuitive drag-and-drop, node-based interface. Create complex, non-linear workflows with ease.
-*   **Real-time Previews:** Instantly inspect the output of any node in your pipeline. This allows for rapid parameter tuning and debugging without re-running the entire process.
-*   **Powerful & Extensible Backend:** The core engine leverages the speed and efficiency of `libvips`, extended with the statistical power of `R` and the flexibility of `Python` for specialized and AI-driven tasks.
-*   **Intelligent Caching:** Never process the same data twice. The backend automatically caches the result of every operation. If you change a parameter upstream, only the affected downstream nodes are re-computed, saving significant time.
-*   **Rich Operator Library:** Comes packed with a wide range of operators:
-    *   **Transforms:** Resize, Flip, Rotate, Crop
-    *   **Filters:** Gaussian Blur, Sharpen, Sobel & Canny Edge Detection
-    *   **Color:** Colourspace Conversion, Negate, Gamma, False Colour
-    *   **Analysis & Segmentation:** Thresholding, Morphological Operations (Open, Close, Erode, Dilate), Distance Maps, and Adaptive Thresholding.
-    *   **Object-Based Filtering:** Remove objects by size, aspect ratio, or roundness.
-    *   **AI/ML:** Integrated **YOLO World** for prompt-based object segmentation.
-*   **Asynchronous Processing:** Built on a non-blocking Perl and Mojolicious backend, the UI remains fast and responsive even while executing heavy-duty pipelines.
-*   **Stateless API:** Includes an endpoint for processing images on-the-fly without permanently storing them, perfect for integration into other services.
+*   **Desktop-Class Cappuccino Frontend**
+    *   Experience a rich, fluid user interface with smooth drag-and-drop, zooming, and panning.
+    *   Build complex, non-linear workflows with an intuitive node-graph editor.
+    *   Utilize desktop-style UI elements like sliders, pop-up buttons, and real-time text fields in the Inspector to fine-tune every parameter.
 
-## How It Works
+*   **High-Performance Asynchronous Backend**
+    *   Built with **Mojolicious (Perl)**, the backend uses a promise-based, non-blocking architecture to handle long-running image processing tasks without ever freezing the UI.
+    *   The system intelligently orchestrates command-line execution of any registered script, making it language-agnostic.
 
-PatchbayVIPS consists of a JavaScript frontend that communicates with a Mojolicious (Perl) backend.
+*   **Intelligent & Universal Cache Control**
+    *   Never process the same data twice. The backend automatically caches the result of every node based on its unique set of parameters and input image(s).
+    *   Change a parameter, and only the affected downstream nodes are re-computed. This provides instant feedback and dramatically accelerates iterative development.
+    *   This powerful caching works out-of-the-box for **any shell script** you integrate, not just a predefined set.
 
-1.  The user designs a pipeline in the browser.
-2.  The pipeline structure and parameters are stored in a **PostgreSQL** database.
-3.  When a pipeline is executed, the backend traverses the node graph.
-4.  For each node, it checks the **cache** for an existing result.
-5.  On a cache miss, it constructs and executes a command-line call to the appropriate tool (`vips`, `Rscript`, or `python3`).
-6.  The resulting image is saved to disk and its unique ID is stored in the cache before being passed to the next node.
+*   **State-of-the-Art Operator Library**
+    The system comes pre-loaded with a versatile set of operators leveraging industry-standard tools:
+    *   **`libvips`:** For lightning-fast, memory-efficient core image processing (resize, blur, color operations, filters).
+    *   **`EBImage (R)`:** For advanced scientific and biological image analysis (morphological operations, object segmentation, feature extraction).
+    *   **`YOLOv8 (Python)`:** For cutting-edge, AI-driven object detection and segmentation using the latest models.
+
+*   **Effortless Extensibility**
+    Adding your own custom tools is a core feature, not an afterthought. The process is simple:
+    1.  **Write Your Script:** Create a command-line script in any language (Python, R, Ruby, Bash, etc.) that accepts an input image path and writes an output image.
+    2.  **Define the GUI:** Create a simple **Cappuccino XML** file describing the inspector UI for your script's parameters (e.g., sliders, text fields).
+    3.  **Register the Operator:** Add a single entry to the `blocks_catalogue` database table, pointing to your script and its GUI definition. Your new node is instantly available in the editor.
 
 ## Technology Stack
 
-*   **Backend:** Perl, Mojolicious::Lite
+*   **Frontend:** **Cappuccino** Framework, JavaScript, HTML5
+*   **Backend:** **Mojolicious::Lite** (Perl)
 *   **Database:** PostgreSQL
 *   **Core Image Processing:** `libvips`
-*   **Scientific/Statistical Processing:** `R`
-*   **AI/ML & Custom Scripting:** `Python`
-*   **Frontend:** HTML, JavaScript
+*   **Scientific Analysis:** `R` (leveraging libraries like `EBImage`)
+*   **AI / Machine Learning:** `Python 3` (leveraging libraries like `ultralytics` for YOLOv8)
 
 ## Getting Started
 
@@ -60,9 +60,9 @@ PatchbayVIPS consists of a JavaScript frontend that communicates with a Mojolici
 1.  **Prerequisites:**
     *   Perl and `cpanm`
     *   PostgreSQL server
-    *   `libvips` command-line tools
-    *   An `R` installation with required libraries
-    *   A `Python 3` installation with required libraries
+    *   `libvips` command-line tools (`vips`)
+    *   An `R` installation with required libraries (e.g., `EBImage`, `argparse`)
+    *   A `Python 3` installation with required libraries (e.g., `ultralytics`, `opencv-python`)
 
 2.  **Installation:**
     ```bash
@@ -70,19 +70,17 @@ PatchbayVIPS consists of a JavaScript frontend that communicates with a Mojolici
     git clone <your-repo-url>
     cd PatchbayVIPS
 
-    # Install Perl dependencies
+    # Install Perl dependencies from cpanfile
     cpanm --installdeps .
 
-    # Set up the database
-    # ... create database and run schema.sql ...
+    # Set up the PostgreSQL database and run the schema
+    # (Detailed instructions here)
 
-    # Start the backend server
+    # Start the development server
     morbo backend.pl
     ```
 
 3.  **Usage:**
-    *   Open `http://localhost:3000/Frontend/index.html` in your web browser.
-    *   Create a new project from the left-hand panel.
-    *   Right-click on the canvas or use the "Add Operator" button to start building!
-
----
+    *   Open `http://localhost:3000/Frontend/index.html` in a supported web browser.
+    *   Create a new project.
+    *   Use the "Add Operator..." button to start building your first pipeline

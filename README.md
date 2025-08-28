@@ -60,7 +60,6 @@ We register this new operator in the `blocks_catalogue` table with a single entr
 
 | Field | Value |
 | :--- | :--- |
-| `id` | `201` (example) |
 | `command` | `convert` |
 | `name` | `charcoal_effect` (display name) |
 | `gui_xml` | `"<hbox>...see below...</hbox>"` |

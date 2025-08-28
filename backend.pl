@@ -25,6 +25,14 @@ no warnings 'uninitialized';
 
 helper pg => sub { state $pg = Mojo::Pg->new('postgresql://postgres@localhost/vips_patchbay') };
 
+helper get_output_block => sub {
+    my ($self, $project_id) = @_;
+    return $self->pg->db->query(
+        q{SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL AND bc.name NOT IN ('Label')},
+        $project_id
+    )->hash;
+};
+
 my $IMAGE_STORE_DIR = Mojo::File->new('./image_store')->make_path->to_abs;
 my $CACHED_IMAGE_DIR = $IMAGE_STORE_DIR->child('cached_images')->make_path;
 my $THUMBNAIL_DIR = $IMAGE_STORE_DIR->child('thumbnails')->make_path;
@@ -125,12 +133,7 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
     push @temp_files_to_delete, $temp_input_path;
 
     # 3. Find the final output block for the project.
-    my $output_block = $self->pg->db->query(
-                                            q{
-                                                SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
-                                             },
-                                                $idproject
-                                            )->hash;
+    my $output_block = $self->get_output_block($idproject);
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $idproject." });
@@ -419,9 +422,7 @@ post '/VIPS/run' => sub {
     my $idproject = $json_body->{idproject};
     my $input_uuid = $json_body->{input_uuid}; # Frontend now sends the selected UUID
 
-    my $block = $self->pg->db->query(q{
-                                        select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null and bc.name not in ('Label')
-                                      }, $idproject)->hash;
+    my $block = $self->get_output_block($idproject);
 
     # The input to the graph is now a UUID
     $self->get_result_of_block_id_p($block->{id}, $input_uuid)
@@ -533,7 +534,7 @@ get '/VIPS/project/:projectid/image/:input_uuid' => [projectid => qr/\d+/, input
     my $projectid = $self->param('projectid');
     my $input_uuid = $self->param('input_uuid');
 
-    my $block = $self->pg->db->query(q{select blocks.id from blocks join blocks_catalogue on idblock =  blocks_catalogue.id where idproject = ? and outputs is null and blocks_catalogue.name not in ('Label')}, $projectid)->hash;
+    my $block = $self->get_output_block($projectid);
     unless ($block && $block->{id}) {
         return $self->render(status => 404, json => { error => "Output block not found for project $projectid" });
     }
@@ -601,12 +602,7 @@ post '/VIPS/project/:projectid/outputs' => [projectid => qr/\d+/] => sub {
         return $self->render(status => 400, json => { error => "Missing or invalid 'input_uuids' array in request body." });
     }
 
-    my $output_block = $self->pg->db->query(
-                                                q{
-                                                    SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
-                                                },
-        $projectid
-    )->hash;
+    my $output_block = $self->get_output_block($projectid);
 
     unless ($output_block && $output_block->{id}) {
         return $self->render(status => 404, json => { error => "Final output block not found for project $projectid" });
@@ -845,12 +841,7 @@ helper get_result_of_block_id_p => sub {
         my $sub_project_id = $sub_project->{id};
 
         # Find the final output block of the sub-project.
-        my $output_block = $self->pg->db->query(
-                                                    q{
-                                                        SELECT b.id FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id WHERE b.idproject = ? AND bc.outputs IS NULL and bc.name not in ('Label')
-                                                    },
-            $sub_project_id
-        )->hash;
+        my $output_block = $self->get_output_block($sub_project_id);
 
         unless ($output_block && $output_block->{id}) {
             return Mojo::Promise->reject("Final output block not found for sub-project '$sub_project_name'.");

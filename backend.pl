@@ -35,7 +35,6 @@ helper get_output_block => sub {
 
 my $IMAGE_STORE_DIR = Mojo::File->new('./image_store')->make_path->to_abs;
 my $CACHED_IMAGE_DIR = $IMAGE_STORE_DIR->child('cached_images')->make_path;
-my $THUMBNAIL_DIR = $IMAGE_STORE_DIR->child('thumbnails')->make_path;
 
 # turn browser cache off
 hook after_dispatch => sub {
@@ -243,7 +242,6 @@ post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
 get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     my $self = shift;
     my $uuid = $self->param('uuid');
-    my $width = $self->param('w');
 
     # Find the source file by its base UUID, regardless of extension
     my $source_file = $self->find_image_path_by_uuid($uuid);
@@ -253,67 +251,7 @@ get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
         return $self->render(status => 404, text => 'Not Found');
     }
 
-    # If no width is specified, serve the original full-resolution image
-    unless ($width) {
-        return $self->reply->file($source_file);
-    }
-
-    # --- On-demand Thumbnail Generation Logic ---
-
-    # Sanitize the width parameter
-    $width = int($width);
-    if ($width <= 0 || $width > 4096) { # Set a reasonable max size
-        return $self->render(status => 400, text => 'Invalid width parameter');
-    }
-
-    # Define the path for the cached thumbnail
-    my $thumbnail_filename = "${uuid}_w${width}.jpg"; # Use jpg for thumbnails for good compression
-    my $thumbnail_path = $THUMBNAIL_DIR->child($thumbnail_filename);
-
-    # Cache Hit: If the thumbnail already exists, serve it immediately.
-    if (-e $thumbnail_path) {
-        return $self->reply->file($thumbnail_path);
-    }
-
-    # Cache Miss: Generate the thumbnail.
-    # We use a lock file to prevent multiple web workers from trying to
-    # generate the same thumbnail simultaneously if many requests arrive at once.
-    my $lock_path = $thumbnail_path . '.lock';
-    open my $lock_fh, '>', $lock_path or die "Cannot open lock file $lock_path: $!";
-    flock($lock_fh, LOCK_EX);
-
-    # After acquiring the lock, check again if another process created the file while we waited.
-    if (-e $thumbnail_path) {
-        flock($lock_fh, LOCK_UN);
-        close $lock_fh;
-        return $self->reply->file($thumbnail_path);
-    }
-
-    # Use the 'vips thumbnail' command, which is highly optimized for this task.
-    # It's faster and uses less memory than 'vips resize'.
-    my $command = sprintf(
-    'vips thumbnail %s %s %d --height 10000 --auto-rotate --size=both',
-    $source_file,
-    $thumbnail_path,
-    $width
-    );
-    # The high --height value ensures we constrain by width while maintaining aspect ratio.
-
-    app->log->debug("Generating thumbnail: $command");
-    my $output = `$command 2>&1`;
-
-    # Clean up the lock file
-    flock($lock_fh, LOCK_UN);
-    close $lock_fh;
-    unlink $lock_path;
-
-    if ($? != 0 || !-e $thumbnail_path) {
-        app->log->error("Thumbnail generation failed for $uuid (width $width): $output");
-        return $self->render(status => 500, text => 'Thumbnail generation failed');
-    }
-
-    # Finally, serve the newly created thumbnail
-    return $self->reply->file($thumbnail_path);
+    return $self->reply->file($source_file);
 };
 
 # route to toggle a block's enabled/disabled state and clear downstream cache

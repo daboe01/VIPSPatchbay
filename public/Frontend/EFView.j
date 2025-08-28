@@ -729,16 +729,16 @@ var _inoutputObservationContext = 1094;
 {
     var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:14] : [CPFont systemFontOfSize:14]};
     var result =  [[self title] sizeWithAttributes:attributes];
-    return CGSizeMake(result.width + 8, result.height + 8);
+    return CGSizeMake(result.width + 18, result.height + 8);
 }
 
 - (void)drawRect:(CGRect)rect
 {
     var bounds = CGRectInset([self bounds], 4, 4);
-    var stringSize = [[self title] sizeWithAttributes:_stringAttributes];
     [[CPColor blackColor] set];
 
     var attributes = @{CPFontAttributeName:[self isSelected] ? [CPFont boldSystemFontOfSize:14] : [CPFont systemFontOfSize:14]};
+    var stringSize = [[self title] sizeWithAttributes:attributes];
 
     [[self title] drawAtPoint:CGPointMake(bounds.origin.x + (bounds.size.width - stringSize.width) / 2, 12) withAttributes:attributes];
 }

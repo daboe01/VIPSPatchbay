@@ -172,6 +172,7 @@ BaseURL=HostURL+"/";
     id  spinnerImg;
     id  inputCollectionView;
     id  outputCollectionView;
+    id  _outputSpinnerView;
 
     // Upload properties
     id myCuploader;
@@ -327,6 +328,12 @@ BaseURL=HostURL+"/";
         return;
     }
 
+    // Show spinner and dim collection view
+    var aFrame = [outputCollectionView frame];
+    [_outputSpinnerView setFrameOrigin:CGPointMake(aFrame.origin.x + (aFrame.size.width - 32) / 2, aFrame.origin.y + (aFrame.size.height - 32) / 2)];
+    [_outputSpinnerView setHidden:NO];
+    [outputCollectionView setAlphaValue:0.5];
+
     var payload = @{"input_uuids": inputUUIDs};
 
     var myreq = [CPURLRequest requestWithURL:"/VIPS/project/" + projectID + "/outputs"];
@@ -369,6 +376,10 @@ BaseURL=HostURL+"/";
     }
     else if (aConnection == outputImagesConnection)
     {
+        // Hide spinner and restore collection view
+        [_outputSpinnerView setHidden:YES];
+        [outputCollectionView setAlphaValue:1.0];
+
         var imagesIn = JSON.parse(aData);
         var imagesOut = [CPArray new];
 
@@ -445,7 +456,13 @@ BaseURL=HostURL+"/";
 
     [CPBundle loadRessourceNamed:"model.gsmarkup" owner:self];
     [CPBundle loadRessourceNamed:"gui.gsmarkup" owner:self];
-    spinnerImg = [[CPImage alloc] initWithContentsOfFile:[CPString stringWithFormat:@"%@%@", [[CPBundle mainBundle] resourcePath], "spinner.gif"]];
+    spinnerImg = [[CPImage alloc] initWithContentsOfFile:[CPString stringWithFormat:@"%@%@", [[CPBundle mainBundle] resourcePath], @"spinner.gif"]];
+
+    // Create and configure the output spinner
+    _outputSpinnerView = [[CPImageView alloc] initWithFrame:CGRectMake(0, 0, 32, 32)];
+    [_outputSpinnerView setImage:spinnerImg];
+    [_outputSpinnerView setHidden:YES];
+    [[outputCollectionView superview] addSubview:_outputSpinnerView];
 
     // Initialize Uploader to the /VIPS/upload endpoint
     myCuploader = [[Cup alloc] initWithURL:BaseURL + "VIPS/upload"];

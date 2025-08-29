@@ -89,7 +89,7 @@
         }
 
         // B. Add this block's GUI definition to our master string
-        markupContent += '<label halign="left">' + blockName + ' (id: ' + blockId + ')</label>';
+        markupContent += '<label halign="left">' + blockName + '</label>';
 
         // C. Transform 'column' attributes to bind to the unique key in our flat dictionary
         var bindingPrefix = '_inspectorDataController.selection.';

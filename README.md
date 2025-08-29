@@ -16,12 +16,14 @@ PatchbayVIPS is built on the principle that powerful tools should not be complic
 2.  **An Intelligent Backend:** An asynchronous, non-blocking engine that manages complex workflows, caching, and execution with unparalleled efficiency.
 3.  **Limitless Extensibility:** A framework designed from the ground up to be easily extended with your own custom scripts and tools.
 
-## ImageJ on Steroids
+## ImageJ on Steroids: The Power of the Pipeline
 
-For those familiar with **ImageJ**, PatchbayVIPS can be seen as its spiritual successor for the modern web era. While it shares the core philosophy of a visual, plugin-driven workflow, PatchbayVIPS elevates the concept in several key ways:
-*   **Web-Native & Collaborative:** No installation required for end-users. Access your pipelines from anywhere.
-*   **Language Agnostic:** You are not locked into a single language's ecosystem. Integrate the best tool for the job, whether it's Python, R, the mighty **ImageMagick**, or any other command-line executable.
-*   **Universal Caching:** The intelligent, automatic caching of every operation provides a massive performance boost and enables a truly interactive and iterative workflow that is difficult to achieve in traditional tools.
+For those familiar with **ImageJ**, PatchbayVIPS can be seen as its spiritual successor for the modern web era. While ImageJ is a landmark tool, PatchbayVIPS offers a paradigm shift in workflow. The key advantage is not just caching or web access, but the creation of **self-documenting, reproducible pipelines of chained operations.**
+
+*   **Self-Documenting Pipelines:** Forget trying to decipher linear scripts or macro recordings. In PatchbayVIPS, the visual graph *is* the documentation. The flow of data, operator dependencies, and all parameters are explicitly laid out, making even the most complex workflows instantly understandable and shareable.
+*   **Guaranteed Reproducibility:** Every pipeline—including all nodes, their precise connections, and every parameter setting—is saved as a single, self-contained entity. This eliminates ambiguity and ensures that any analysis can be perfectly replicated by anyone at any time, a cornerstone of scientific and analytical integrity.
+*   **Interactive & Non-Destructive Exploration:** Tweak any parameter at any stage of the pipeline and instantly see the final result. The ability to inspect the output of any intermediate node makes debugging and algorithm development incredibly intuitive, allowing for rapid, non-destructive experimentation.
+*   **Polyglot Power:** Build these robust pipelines by seamlessly combining the fastest tools (`libvips`), the most versatile filters (`ImageMagick`), powerful statistical packages (`R`), and the latest AI models (`Python`), all in one visual interface.
 
 ## Key Features
 
@@ -42,7 +44,7 @@ For those familiar with **ImageJ**, PatchbayVIPS can be seen as its spiritual su
 *   **State-of-the-Art Operator Library**
     The system comes pre-loaded with a versatile set of operators leveraging industry-standard tools:
     *   **`libvips`:** For lightning-fast, memory-efficient core image processing.
-    *   **`ImageMagick`:** For access to its legendary suite of filters and effects.
+    *   **`ImageMagick`:** For access to its legendary suite of hundreds of filters and effects.
     *   **`EBImage (R)`:** For advanced scientific and biological image analysis.
     *   **`YOLOv8 (Python)`:** For cutting-edge, AI-driven object detection.
 
@@ -61,13 +63,11 @@ We register this new operator in the `blocks_catalogue` table with a single entr
 | Field | Value |
 | :--- | :--- |
 | `command` | `convert` |
-| `name` | `charcoal_effect` (display name) |
+| `display_name` | `Charcoal Effect` |
 | `gui_xml` | `"<hbox>...see below...</hbox>"` |
 | `gui_fields`| `"["factor"]"` |
 | `parameter_template`| `"-charcoal %s"` |
 | ... | ... |
-
-Let's break down the key fields that make the magic happen:
 
 ### 2. The GUI Definition (`gui_xml`)
 
@@ -87,19 +87,7 @@ This field contains a snippet of **Cappuccino XML** that describes the interacti
     *   `column="factor"`: **This is the critical link.** It assigns the slider's value to a parameter named `factor`.
 *   `<textField>`: A text box, also linked to the `factor` parameter, allowing for precise numerical input.
 
-This simple XML generates a professional, fully-functional UI component without writing any JavaScript.
-
-### 3. Linking GUI to Command (`gui_fields` & `parameter_template`)
-
-These two fields bridge the gap between the user interface and the command-line script.
-
-*   **`gui_fields`: `"["factor"]"`**
-    *   This JSON array tells the backend which parameters to collect from the UI. In this case, it's just the value of the control linked to the `factor` column.
-
-*   **`parameter_template`: `"-charcoal %s"`**
-    *   This is the template for the command-line arguments. The backend takes the value of our `factor` parameter (e.g., `2` from the slider) and uses `sprintf` to format it into this string, resulting in `"-charcoal 2"`.
-
-And that's it. The backend now has all the information it needs to dynamically build and execute the correct ImageMagick command based on the user's interaction with the slider. This simple yet powerful system allows you to wrap any command-line tool into a user-friendly, interactive node within minutes.
+This simple XML generates a professional, fully-functional UI component without writing any JavaScript. This declarative approach means you can design complex interfaces for any command-line tool with just a few lines of XML.
 
 ## Technology Stack
 

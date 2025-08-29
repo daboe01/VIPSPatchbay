@@ -76,8 +76,8 @@ This field contains a snippet of **Cappuccino XML** that describes the interacti
 ```xml
 <hbox>
     <label halign="min" width="150" valign="center">Charcoal Factor:</label>
-    <slider id="factorSlider" min="0" max="10" value="2" column="factor" />
-    <textField id="factorTextField" column="factor" />
+    <slider min="0" max="10" value="2" column="factor" />
+    <textField column="factor" />
 </hbox>
 ```
 *   `<hbox>`: A horizontal container that arranges the elements side-by-side.

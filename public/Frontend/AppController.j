@@ -275,7 +275,9 @@ BaseURL=HostURL+"/";
 
         if (sender)
         {
-            [self setButtonBusy:sender];
+            if ([sender isKindOfClass:CPButton])
+                [self setButtonBusy:sender];
+
             runConnection._senderButton = sender;
         }
 

@@ -8,11 +8,12 @@
 
 @import <Foundation/CPObject.j>
 @import <Renaissance/Renaissance.j>
+@import "NotifyingMutableDictionary.j"
 
 // Keep all the formatters and custom sliders from your provided code
 @implementation ReversePercentageFormatter : CPFormatter
-- (CPString)stringForObjectValue:(id)theObject { return [theObject isKindOfClass:CPString] ? [theObject stringByAppendingString:"%"] : [[theObject stringValue] stringByAppendingString:"%"]; }
-- (id)objectValueForString:(CPString)aString { return [aString stringByReplacingOccurrencesOfString:"%" withString:""]; }
+- (CPString)stringForObjectValue:(id)theObject { return [theObject isKindOfClass:CPString] ? [theObject stringByAppendingString:@"%"] : [[theObject stringValue] stringByAppendingString:@"%"]; }
+- (id)objectValueForString:(CPString)aString { return [aString stringByReplacingOccurrencesOfString:@"%" withString:@""]; }
 @end
 
 @implementation IntegerFormatter : CPFormatter
@@ -25,7 +26,7 @@
 - (id)objectValueForString:(CPString)aString { return Number(aString).toFixed(3); }
 @end
 
-@implementation OptionSlider: CPSlider
+@implementation OptionSlider:CPSlider
 - (void)mouseDown:(CPEvent)anEvent { [self setContinuous: ![anEvent modifierFlags]]; [super mouseDown: anEvent]; }
 @end
 
@@ -43,6 +44,7 @@
     id _inspectorDataController;  // A single ArrayController for our one data object
     id _combinedDataObject;       // The single, flat dictionary holding all parameters
     id _stagingView;              // The top-level view with all generated controls
+    CPTimer _saveTimer;
 }
 
 - (id)initWithProject:(id)aProject
@@ -54,7 +56,8 @@
     // === Step 1: Create the single data model ===
 
     _inspectorDataController = [CPArrayController new];
-    _combinedDataObject = [CPMutableDictionary dictionary];
+    _combinedDataObject = [NotifyingMutableDictionary dictionary];
+    [_combinedDataObject setDelegate:self];
     // This object doesn't correspond to a DB entity, so we give it a dummy ID
     [_combinedDataObject setObject:@"1" forKey:@"id"];
 
@@ -93,7 +96,7 @@
         // This regex replacement is more robust than a simple string replace.
         // It finds 'column="xyz"' and replaces it with a full binding to 'xyz@blockId'.
 
-        var processed_xml = (gui_xml + '').replace(/column="([^"]+)"/g, 'valueBinding="#CPOwner.' + bindingPrefix + '$1@' + blockId + '"');
+        var processed_xml = (gui_xml + '').replace(/column=\"([^\"]+)\"/g, 'valueBinding="#CPOwner.' + bindingPrefix + '$1@' + blockId + '"');
         markupContent += processed_xml;
         markupContent += '<divider/>';
     }
@@ -107,27 +110,23 @@
     '</vbox> </objects> <connectors> <outlet source="#CPOwner" target="widgets" label="_stagingView"/> </connectors></gsmarkup>';
 
     [CPBundle loadGSMarkupData:[CPData dataWithRawString:finalMarkup]
-             externalNameTable:[CPDictionary dictionaryWithObject:self forKey:"CPOwner"]
+             externalNameTable:[CPDictionary dictionaryWithObject:self forKey:@"CPOwner"]
        localizableStringsTable:nil inBundle:nil tagMapping:nil];
 
 
+    
+
     // === Step 4: Build the inspector window and its chrome ===
     _panel = [[CPWindow alloc] initWithContentRect:CGRectMake(200, 50, 400, 700) styleMask:CPTitledWindowMask | CPClosableWindowMask | CPResizableWindowMask];
-    [_panel setTitle:"Inspector for: " + [_project valueForKey:"name"]];
+    [_panel setTitle:@"Inspector for: " + [_project valueForKey:@"name"]];
 
     var mainVBox = [[CPView alloc] initWithFrame:[[_panel contentView] bounds]];
     [mainVBox setAutoresizingMask:CPViewWidthSizable | CPViewHeightSizable];
     [[_panel contentView] addSubview:mainVBox];
 
-    var scrollView = [[CPScrollView alloc] initWithFrame:CGRectMake(0, 30, [_panel frame].size.width, [_panel frame].size.height - 30)];
+    var scrollView = [[CPScrollView alloc] initWithFrame:CGRectMake(0, 0, [_panel frame].size.width, [_panel frame].size.height)];
     [scrollView setAutoresizingMask:CPViewWidthSizable | CPViewHeightSizable];
     [mainVBox addSubview:scrollView];
-
-    var saveButton = [[CPButton alloc] initWithFrame:CGRectMake(10, 5, 120, 24)];
-    [saveButton setTitle:"Save & Apply"];
-    [saveButton setTarget:self];
-    [saveButton setAction:@selector(saveAndApplyChanges:)];
-    [mainVBox addSubview:saveButton];
 
     // === Step 5: Place the staging view into the scroll view ===
     // Only now is the fully populated view added to the window's hierarchy.
@@ -154,8 +153,8 @@
     for (var i = 0; i < [allKeys count]; i++) {
         var key = [allKeys objectAtIndex:i];
 
-        if ([key containsString:'@']) {
-            var parts = [key componentsSeparatedByString:'@'];
+        if ([key containsString:@"@"]) {
+            var parts = [key componentsSeparatedByString:@"@"];
             var paramName = parts[0];
             var blockId = parts[1];
             var value = [_combinedDataObject objectForKey:key];
@@ -189,7 +188,7 @@
         }
     }
 
-    // [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:"Saved" message:"Inspector changes have been saved. Images will be reprocessed now and should update soon."];
+    // [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:@"Saved" message:@"Inspector changes have been saved. Images will be reprocessed now and should update soon."];
 
     [CPApp._delegate run:sender];
 }
@@ -197,6 +196,19 @@
 - (void)showWindow:(id)sender
 {
     [_panel makeKeyAndOrderFront:sender];
+}
+
+- (void)dictionaryDidChange:(NotifyingMutableDictionary)aDictionary
+{
+    [self scheduleSave:nil];
+}
+
+- (void)scheduleSave:(id)sender
+{
+    if (_saveTimer)
+        [_saveTimer invalidate];
+
+    _saveTimer = [CPTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(saveAndApplyChanges:) userInfo:nil repeats:NO];
 }
 
 @end

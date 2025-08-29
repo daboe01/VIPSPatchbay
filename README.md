@@ -94,4 +94,4 @@ This simple XML generates a professional, fully-functional UI component without 
 *   **Frontend:** **[Cappuccino](https://www.cappuccino.dev/)** Framework, JavaScript, HTML5
 *   **Backend:** **[Mojolicious::Lite](https://mojolicious.org/)** (Perl)
 *   **Database:** PostgreSQL
-*   **Image Processing Engines:** `libvips`, `ImageMagick`, `R` (`EBImage`), `Python 3` (`YOLOv8`)
+*   **Image Processing Engines:** `libvips`, `ImageMagick`, `R` (e.g. `EBImage`), `Python 3` (e.g. `ultralytics`)

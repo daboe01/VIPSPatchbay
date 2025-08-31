@@ -76,8 +76,8 @@ This field contains a snippet of **Cappuccino XML** that describes the interacti
 ```xml
 <hbox>
     <label halign="min" width="150" valign="center">Charcoal Factor:</label>
-    <slider id="factorSlider" min="0" max="10" value="2" column="factor" />
-    <textField id="factorTextField" column="factor" />
+    <slider min="0" max="10" value="2" column="factor" />
+    <textField column="factor" />
 </hbox>
 ```
 *   `<hbox>`: A horizontal container that arranges the elements side-by-side.
@@ -91,7 +91,7 @@ This simple XML generates a professional, fully-functional UI component without 
 
 ## Technology Stack
 
-*   **Frontend:** **[Cappuccino](https://www.cappuccino.dev/)** Framework, JavaScript, HTML5
-*   **Backend:** **[Mojolicious::Lite](https://mojolicious.org/)** (Perl)
-*   **Database:** PostgreSQL
-*   **Image Processing Engines:** `libvips`, `ImageMagick`, `R` (e.g. `EBImage`), `Python 3` (e.g. `ultralytics`)
+*   **Frontend:** **[Cappuccino](https://www.cappuccino.dev/)**
+*   **Backend:** **[Mojolicious::Lite](https://mojolicious.org/)**
+*   **Database:** **[PostgreSQL](https://www.postgresql.org/)**
+*   **Image Processing Engines:** [libvips](https://www.libvips.org/), [ImageMagick](https://imagemagick.org/), `R` (e.g. [EBImage](https://bioconductor.org/packages/release/bioc/html/EBImage.html)), `Python 3` (e.g. [ultralytics](https://www.ultralytics.com/))

@@ -39,8 +39,7 @@ tryCatch({
 })
 
 
-# Apply the specified top-hat filter
-processed_img <- distmap(img>0.5) / 10
+processed_img <- distmap(img>0.5)
 
 # Save the resulting image
 cat("Writing output image to:", outfile, "\n")

@@ -20,6 +20,7 @@ use Fcntl qw(:flock); # For file locking to prevent race conditions
 use Text::ParseWords qw(shellwords);
 use Mojo::Promise;
 use Mojo::IOLoop;
+use File::Temp (); # Use the core File::Temp module for temporary files
 
 no warnings 'uninitialized';
 
@@ -35,6 +36,9 @@ helper get_output_block => sub {
 
 my $IMAGE_STORE_DIR = Mojo::File->new('./image_store')->make_path->to_abs;
 my $CACHED_IMAGE_DIR = $IMAGE_STORE_DIR->child('cached_images')->make_path;
+# A dedicated directory for stateless processing to keep things clean
+my $STATELESS_TEMP_DIR = $IMAGE_STORE_DIR->child('stateless_temp')->make_path;
+
 
 # turn browser cache off
 hook after_dispatch => sub {
@@ -78,100 +82,232 @@ post '/VIPS/upload' => sub {
 # New helper to find an image path by its base UUID, regardless of extension
 helper find_image_path_by_uuid => sub {
     my ($self, $uuid) = @_;
-    return undef unless $uuid && $uuid =~ /^[0-9a-f\-]{36}$/i;
+    # Allow UUIDs that might have been created as temporary file names
+    return undef unless $uuid;
 
-    # Search in the main image store first
-    my $found_file = $IMAGE_STORE_DIR->list({dir => 0})->first(sub {
-        $_->basename =~ /^\Q$uuid\E(\.|$)/
-    });
+    # Define all directories to search in order of priority
+    my @search_dirs = ($IMAGE_STORE_DIR, $CACHED_IMAGE_DIR, $STATELESS_TEMP_DIR);
 
-    # If not found, search in the cached images directory
-    if (!$found_file) {
-        $found_file = $CACHED_IMAGE_DIR->list({dir => 0})->first(sub {
+    for my $dir (@search_dirs) {
+        my $found_file = $dir->list({dir => 0})->first(sub {
             $_->basename =~ /^\Q$uuid\E(\.|$)/
         });
+        return $found_file if $found_file;
     }
 
-    return $found_file;
+    return undef; # Return undef if not found in any directory
 };
 
-post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => sub {
-    my $self = shift;
-    my $idproject = $self->param('idproject');
-    $self->render_later; # Signal that the response will be sent asynchronously
 
-    # 1. Expect an 'image' file in the form data.
-    my $upload = $self->req->upload('image');
-    unless ($upload && $upload->size > 0) {
-        return $self->render(status => 400, json => { error => "Missing or empty 'image' file upload in the request." });
+helper run_stateless_pipeline => sub {
+    my ($c, $block_id, $input_uuid, $processing_cache, $temp_files_list) = @_;
+
+    my $cache_key = "$block_id:$input_uuid";
+    return $processing_cache->{$cache_key} if exists $processing_cache->{$cache_key};
+
+    my $block_info = $c->pg->db->query(q{
+                                            SELECT
+                                            bc.name, bc.command, bc.parameter_template, bc.parameter_mappings, bc.gui_fields,
+                                            b.connections, b.output_value, b.enabled
+                                            FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id
+                                            WHERE b.id = ?
+                                        }, $block_id)->hash;
+
+    unless ($block_info) {
+        $c->app->log->error("Stateless pipeline: Block ID $block_id not found.");
+        return undef;
     }
 
-    # This array will keep track of all files created during this request.
-    my @temp_files_to_delete;
+    my $conn = decode_json($block_info->{connections} || '{}');
+    my $settings;
+    eval { $settings = decode_json($block_info->{output_value} || '{}'); };
+    $settings = {} if $@;
+    $block_info->{parameter_mappings} = decode_json($block_info->{parameter_mappings} || '{}');
 
-    # Set up a deferred subroutine to ensure cleanup happens even if errors occur.
-    $self->on(finish => sub {
+    if (defined $block_info->{enabled} && $block_info->{enabled} == 0) {
+        my @input_keys = sort keys %$conn;
+        return undef unless @input_keys;
+        my $input_block_id = $conn->{$input_keys[0]};
+        return $c->run_stateless_pipeline($input_block_id, $input_uuid, $processing_cache, $temp_files_list);
+    }
+
+    # --- BASE CASES ---
+    if ($block_info->{name} eq 'Input') {
+        return $input_uuid;
+    }
+    if ($block_info->{name} eq 'Load Image') {
+        my $filename = $settings->{filename};
+        my $res = $c->pg->db->query('SELECT uuid FROM input_images WHERE original_filename = ?', $filename)->hash;
+        return $res ? $res->{uuid} : undef;
+    }
+
+    # --- SPECIAL BLOCK HANDLING (Restored from async helper) ---
+    if ($block_info->{name} eq 'Image Preview') {
+        my @input_keys = keys %$conn;
+        unless (@input_keys == 1) {
+            $c->app->log->error("Stateless: Image Preview block $block_id requires exactly one input.");
+            return undef;
+        }
+        my $input_block_id = $conn->{$input_keys[0]};
+        return $c->run_stateless_pipeline($input_block_id, $input_uuid, $processing_cache, $temp_files_list);
+    }
+
+    if ($block_info->{name} eq 'Exec Block') {
+        my $sub_project_name = $block_info->{output_value};
+        my $sub_project = $c->pg->db->query('SELECT id FROM projects WHERE name = ?', $sub_project_name)->hash;
+        unless ($sub_project && $sub_project->{id}) {
+            $c->app->log->error("Stateless: Sub-project '$sub_project_name' not found.");
+            return undef;
+        }
+        my $output_block = $c->get_output_block($sub_project->{id});
+        unless ($output_block && $output_block->{id}) {
+            $c->app->log->error("Stateless: Output block for sub-project '$sub_project_name' not found.");
+            return undef;
+        }
+        my @input_keys = keys %$conn;
+        unless (@input_keys == 1) {
+            $c->app->log->error("Stateless: Exec Block $block_id requires exactly one input.");
+            return undef;
+        }
+        my $input_block_id = $conn->{$input_keys[0]};
+        my $sub_project_input_uuid = $c->run_stateless_pipeline($input_block_id, $input_uuid, $processing_cache, $temp_files_list);
+        return undef unless $sub_project_input_uuid;
+
+        return $c->run_stateless_pipeline($output_block->{id}, $sub_project_input_uuid, $processing_cache, $temp_files_list);
+    }
+
+    # --- RECURSIVE STEP ---
+    my @input_uuids;
+    for my $input_key (sort keys %$conn) {
+        my $input_block_id = $conn->{$input_key};
+        my $result_uuid = $c->run_stateless_pipeline($input_block_id, $input_uuid, $processing_cache, $temp_files_list);
+        unless($result_uuid) {
+            $c->app->log->error("Stateless: Failed to get input from upstream block $input_block_id for target $block_id.");
+            return undef;
+        }
+        push @input_uuids, $result_uuid;
+    }
+
+    # --- COMMAND EXECUTION ---
+    my $ug = Data::UUID->new;
+    my $output_uuid = $ug->create_str();
+
+    my %mapped_settings;
+    for my $key (keys %$settings) {
+        my $value = $settings->{$key};
+        $mapped_settings{$key} = $block_info->{parameter_mappings}->{$key}->{$value} // $value;
+    }
+    my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
+    my @param_values = map { $mapped_settings{$_} } @all_gui_fields;
+
+    # FIXED: Correctly declare variables before use
+    my $param_template = $block_info->{parameter_template} || '';
+    my @positional_param_values;
+    my @templated_args;
+
+    if ($param_template) {
+        my $num_template_params = () = $param_template =~ /%[sd]/g;
+        my $num_positional_params = @param_values - $num_template_params;
+        if ($num_positional_params < 0) {
+            $c->app->log->error("Stateless: Configuration error for block $block_id, not enough parameters for template.");
+            return undef;
+        }
+        @positional_param_values = @param_values[0 .. $num_positional_params - 1] if $num_positional_params > 0;
+        my @template_values = @param_values[$num_positional_params .. $#param_values];
+        my $formatted_str = sprintf($param_template, @template_values);
+        @templated_args = shellwords($formatted_str);
+    } else {
+        @positional_param_values = @param_values;
+    }
+
+    my @input_file_paths;
+    for my $uuid (@input_uuids) {
+        my $path = $c->find_image_path_by_uuid($uuid);
+        unless ($path && -e $path) {
+            $c->app->log->error("Stateless: Input file for UUID $uuid not found for block $block_id");
+            return undef;
+        }
+        push @input_file_paths, $path->to_string;
+    }
+
+    my $output_path = $STATELESS_TEMP_DIR->child($output_uuid . '.png');
+    push @$temp_files_list, $output_path;
+
+    unless ($block_info->{command}) {
+        $c->app->log->error("Stateless: Block $block_id ('$block_info->{name}') has no command to execute.");
+        return undef;
+    }
+    my @cmd_parts = grep { defined && $_ ne '' } ($block_info->{command}, $block_info->{name}, @input_file_paths, $output_path->to_string, @positional_param_values, @templated_args);
+
+    my $cmd_string = join ' ', map { s/'/'\\''/g; "'$_'" } @cmd_parts;
+    my $output = `$cmd_string 2>&1`;
+
+    if ($? != 0 || !-e $output_path || !-s $output_path) {
+        $c->app->log->error("Stateless command failed for block $block_id: $cmd_string");
+        $c->app->log->error("VIPS Output: $output");
+        return undef;
+    }
+
+    $processing_cache->{$cache_key} = $output_uuid;
+    return $output_uuid;
+};
+
+# REWORKED ROUTE
+post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => sub {
+    my $c = shift;
+    my $idproject = $c->param('idproject');
+
+    my $upload = $c->req->upload('image');
+    unless ($upload && $upload->size > 0) {
+        return $c->render(status => 400, json => { error => "Missing or empty 'image' file upload." });
+    }
+
+    my @temp_files_to_delete;
+    $c->on(finish => sub {
         for my $file_path (@temp_files_to_delete) {
             next unless $file_path && -e $file_path;
-            if (unlink $file_path) {
-                $self->app->log->debug("Cleaned up temp file: $file_path");
-            } else {
-                $self->app->log->error("Failed to clean up temp file $file_path: $!");
-            }
+            unlink $file_path->to_string or $c->app->log->error("Failed to cleanup temp file $file_path: $!");
         }
     });
 
-    # 2. Save the uploaded image to a temporary location
     my $ug = Data::UUID->new;
     my $temp_input_uuid = $ug->create_str();
-    my ($name, $path, $ext) = fileparse($upload->filename, qr/\.[^.]*/);
-    $ext //= '.tmp';
-    my $temp_input_filename = $temp_input_uuid . $ext;
-    my $temp_input_path = $IMAGE_STORE_DIR->child($temp_input_filename);
+    my (undef, undef, $ext) = fileparse($upload->filename, qr/\.[^.]*/);
+    my $temp_input_path = $STATELESS_TEMP_DIR->child($temp_input_uuid . ($ext // '.tmp'));
     $upload->move_to($temp_input_path);
     push @temp_files_to_delete, $temp_input_path;
 
-    # 3. Find the final output block for the project.
-    my $output_block = $self->get_output_block($idproject);
-
+    my $output_block = $c->get_output_block($idproject);
     unless ($output_block && $output_block->{id}) {
-        return $self->render(status => 404, json => { error => "Final output block not found for project $idproject." });
+        return $c->render(status => 404, json => { error => "Final output block not found for project $idproject." });
     }
 
-    # 4. Execute the pipeline asynchronously.
     my %processing_cache;
-    $self->get_result_of_block_id_p($output_block->{id}, $temp_input_uuid, \%processing_cache)
-    ->then(sub {
-        my $final_output_uuid = shift;
+    my $final_output_uuid = $c->run_stateless_pipeline(
+    $output_block->{id},
+    $temp_input_uuid,
+    \%processing_cache,
+    \@temp_files_to_delete
+    );
 
-        # Add all generated intermediate/cached files to our cleanup list.
-        for my $generated_uuid (values %processing_cache) {
-            my $file_path = $self->find_image_path_by_uuid($generated_uuid);
-            push @temp_files_to_delete, $file_path if $file_path;
-        }
+    unless ($final_output_uuid) {
+        return $c->render(status => 500, json => { error => "Pipeline execution failed. Check server logs for details." });
+    }
 
-        my $final_image_path = $self->find_image_path_by_uuid($final_output_uuid);
-        unless ($final_image_path && -e $final_image_path) {
-            $self->app->log->error("Processing finished, but final file for UUID $final_output_uuid is missing.");
-            return $self->render(status => 500, json => { error => "Pipeline execution failed to produce a file." });
-        }
+    my $final_image_path = $c->find_image_path_by_uuid($final_output_uuid);
+    unless ($final_image_path && -e $final_image_path) {
+        $c->app->log->error("Pipeline finished, but final file for UUID $final_output_uuid is missing.");
+        return $c->render(status => 500, json => { error => "Pipeline failed to produce a file." });
+    }
 
-        # 5. Read the final image data.
-        my $image_data = eval { $final_image_path->slurp };
-        if ($@) {
-            $self->app->log->error("Could not read final image file '$final_image_path': $@");
-            return $self->render(status => 500, text => "Server error reading final image.");
-        }
+    my $image_data = eval { $final_image_path->slurp };
+    if ($@) {
+        $c->app->log->error("Could not read final image file '$final_image_path': $@");
+        return $c->render(status => 500, text => "Server error reading final image.");
+    }
 
-        # 6. Send the raw image data as the response.
-        $self->res->headers->content_type('image/png');
-        $self->render(data => $image_data);
-    })
-    ->catch(sub {
-        my $error = shift;
-        $self->app->log->error("Stateless image processing pipeline failed: $error");
-        $self->render(status => 500, json => { error => "Stateless image processing pipeline failed to produce an output." });
-    });
+    $c->res->headers->content_type('image/png');
+    return $c->render(data => $image_data);
 };
 
 post '/VIPS/duplicate_project/:id' => [id => qr/\d+/] => sub
@@ -382,60 +518,43 @@ get '/VIPS/block/:block_id/image' => [block_id => qr/\d+/i] => sub {
     my $block_id = $self->param('block_id');
 
     # Query the cache for the most recently generated UUID for this specific block.
-    # This is much more efficient than re-running the pipeline.
     my $cached_info = $self->pg->db->query(
         'SELECT uuid FROM image_cache WHERE idblock = ? ORDER BY creation_timestamp DESC LIMIT 1',
         $block_id
     )->hash;
 
-    # If there's no cache entry, it means this block has never successfully produced an output.
     unless ($cached_info && $cached_info->{uuid}) {
         return $self->render(status => 404, text => 'No cached image output exists for this block.');
     }
 
     my $result_uuid = $cached_info->{uuid};
-
-    # Find the physical file on disk using the UUID.
     my $image_file = $self->find_image_path_by_uuid($result_uuid);
 
-    # It's possible the cache is stale and the file was deleted. We must verify it exists.
     unless ($image_file && -e $image_file) {
-        $self->app->log->warn("Cache entry found for block $block_id (UUID: $result_uuid), but the file is missing from the image store.");
+        $self->app->log->warn("Cache entry found for block $block_id (UUID: $result_uuid), but the file is missing.");
         return $self->render(status => 404, text => 'Cached image file is missing from disk.');
     }
 
-    # To ensure the image can be displayed in any browser, we convert it to a standard
-    # format like PNG on-the-fly. This is robust and handles intermediate formats like .vips.
-
-    # 1. Create a temporary file to hold the PNG conversion.
+    # Use File::Temp for robust temporary file creation
     my $temp = File::Temp->new( SUFFIX => '.png', UNLINK => 1 );
     my $temp_filename = $temp->filename;
-
-    # 2. Build the 'vips pngsave' command to write to the temporary file.
+    
     my @cmd = ('vips', 'pngsave', $image_file->to_string, $temp_filename);
-
-    # 3. Execute the command and capture any errors.
     my $error_output = `@cmd 2>&1`;
-
-    # 4. Check the command's exit status.
+    
     if ($? != 0) {
         $self->app->log->error("Failed to convert cached image to PNG for preview. VIPS said: $error_output");
         return $self->render(status => 500, text => "Failed to generate preview image.");
     }
-
-    # 5. Read the binary data from the successfully created temporary PNG file.
+    
     open(my $fh, '<:raw', $temp_filename) or do {
         $self->app->log->error("Could not open temp file '$temp_filename' for reading: $!");
         return $self->render(status => 500, text => "Server error reading temporary image.");
     };
     my $png_data;
-    {
-        local $/ = undef; # Slurp mode to read the entire file at once
-        $png_data = <$fh>;
-    }
+    { local $/ = undef; $png_data = <$fh>; }
     close $fh;
-
-    # 6. Send the raw PNG data to the browser with the correct content type.
+    
     $self->res->headers->content_type('image/png');
     return $self->render(data => $png_data);
 };
@@ -871,57 +990,31 @@ helper get_result_of_block_id_p => sub {
 
         my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path->to_string, @positional_param_values, @templated_args);
         @command_parts = grep { defined && $_ ne '' } @command_parts;
-
-        # --- ROBUST COMMAND EXECUTION ---
-        # 1. Quote arguments for safe execution within a shell.
-        my $command_string = join ' ', map {
-            my $arg = $_;
-            # A simple but effective quoting for most cases.
-            $arg =~ s/'/'\\''/g;
-            "'$arg'";
-        } @command_parts;
-
-        # 2. Add shell redirection to merge stderr into stdout.
+        
+        my $command_string = join ' ', map { my $arg = $_; $arg =~ s/'/'\\''/g; "'$arg'"; } @command_parts;
         $command_string .= ' 2>&1';
         app->log->debug("Executing shell command: sh -c \"$command_string\"");
 
         my $output_buffer = '';
         my $subprocess = Mojo::IOLoop->subprocess(
         sub {
-            # 3. Execute the command string via the shell.
             exec('sh', '-c', $command_string);
         },
         sub {
             my ($subprocess, $err) = @_;
-
-            # SUCCESS CONDITION: The primary check is for a valid, non-empty output file.
-            # This is more reliable than the $err variable, which can be misleading in
-            # complex async environments.
             if (-e $final_output_path && -s $final_output_path) {
-                # Success! The file was created.
                 $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
                 $promise->resolve($output_uuid);
             } else {
-                # FAILURE CONDITION: The file was not created or is empty.
                 app->log->error("Command execution failed for: $command_string");
-
-                # Now, provide more specific details about the failure.
-                if ($err) {
-                    app->log->error("Subprocess reported an error argument: $err");
-                } else {
-                    app->log->error("Output file was not created or is empty after command execution.");
-                }
+                if ($err) { app->log->error("Subprocess reported an error argument: $err"); }
+                else { app->log->error("Output file was not created or is empty after command execution."); }
                 app->log->error("Combined Output (stdout/stderr): $output_buffer");
-
-                # Clean up the potentially empty file.
                 unlink $final_output_path->to_string if -e $final_output_path;
-
                 $promise->reject("Command execution failed");
             }
         }
         );
-
-        # All output is now on stdout, so we only need to listen to that.
         $subprocess->on(stdout => sub { my ($subprocess, $chunk) = @_; $output_buffer .= $chunk; });
 
         return $promise;
@@ -934,6 +1027,6 @@ helper get_result_of_block_id_p => sub {
 ###################################################################
 # main()
 
-app->config(hypnotoad => {listen => ['http://*:3036'], workers => 2, heartbeat_timeout => 12000, inactivity_timeout => 12000});
+app->config(hypnotoad => {listen => ['http://*:3036'], workers => 3, heartbeat_timeout => 12000, inactivity_timeout => 12000});
 
 app->start;

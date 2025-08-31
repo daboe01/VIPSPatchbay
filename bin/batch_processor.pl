@@ -44,8 +44,8 @@ print "Results will be saved in: $output_dir\n";
 
 # --- Main Logic ---
 my $ua = Mojo::UserAgent->new;
-$ua->connect_timeout(10);
-$ua->inactivity_timeout(300); # 5 minutes for slow processing.
+$ua->connect_timeout(0);
+$ua->inactivity_timeout(0); # 5 minutes for slow processing.
 
 # Find all common image files in the directory (case-insensitive).
 my @image_files = $input_dir->list({dir => 0})->grep(qr/\.(jpe?g|png|tiff?)$/i)->each;
@@ -59,10 +59,11 @@ print "Found " . scalar(@image_files) . " images to process.\n";
 
 for my $input_file (@image_files) {
     my $filename = $input_file->basename;
-    print "Processing '$filename'... ";
+    print "Processing '$filename'... \n";
 
     # 1. Construct the target URL.
     my $url = Mojo::URL->new($SERVER_URL_BASE)->path("/vips/process_image_statelessly/$project_id");
+warn $url;
 
     # 2. Send the POST request using Mojo::UserAgent.
     # The 'image' key must match the one expected by the Mojolicious route.

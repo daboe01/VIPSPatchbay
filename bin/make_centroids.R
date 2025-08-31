@@ -1,22 +1,25 @@
 #!/usr/bin/env Rscript
 
 #
-# This script identifies all blobs in a binary image and replaces each one
-# with a small, filled circle located at the blob's centroid.
+# This script identifies all blobs in a grayscale image and replaces each one
+# with a small, filled circle located at the blob's centroid. The circle's
+# color will be the average intensity of the original blob.
 #
 # It performs the following steps:
-# 1. Reads a binary input image.
-# 2. Identifies all connected objects (blobs).
-# 3. Calculates the centroid (center of mass) for each blob.
-# 4. Creates a new, completely black image of the same size.
-# 5. Draws a filled, white circle on the new image at the location of each centroid.
-# 6. Writes the resulting image of circles to a new file.
+# 1. Reads a grayscale input image.
+# 2. Automatically thresholds the image (Otsu's method) to identify objects.
+# 3. Calculates the centroid for each blob.
+# 4. Calculates the average pixel intensity for each original blob.
+# 5. Creates a new, black image of the same size.
+# 6. Draws a filled circle on the new image at each centroid, using the
+#    blob's average intensity as the color.
+# 7. Writes the resulting image of circles to a new file.
 #
 # Usage:
 #   Rscript replace_blobs_with_circles.R [options] INFILE OUTFILE
 #
 # Arguments:
-#   INFILE        Path to the input black and white image.
+#   INFILE        Path to the input grayscale image.
 #   OUTFILE       Path to write the output image of circles.
 #
 # Options:
@@ -42,10 +45,9 @@ option_list <- list(
 parser <- OptionParser(
     option_list = option_list,
     usage = "%prog [options] INFILE OUTFILE",
-    description = "Replaces binary blobs with circles at their centroids."
+    description = "Replaces blobs with circles of their average intensity."
 )
 
-# Parse arguments, requiring two positional arguments
 parsed_args <- parse_args(parser, positional_arguments = 2)
 options <- parsed_args$options
 args <- parsed_args$args
@@ -73,19 +75,20 @@ if (length(dim(img)) > 2) {
   img <- img[,,1]
 }
 
-# --- Find Centroids ---
+# --- Find Centroids and Blobs ---
 
-cat("Labeling objects and calculating centroids...\n")
+cat("Thresholding with Otsu's method to find blobs...\n")
+# Create a binary mask to identify where the blobs are
+binary_mask <- img > otsu(img)
+# Label the connected components from the mask
+labeled_img <- bwlabel(binary_mask)
 
-# Label connected components (blobs). Input is treated as binary.
-labeled_img <- bwlabel(img)
-
+cat("Calculating centroids...\n")
 # Compute features to get the centroids (center of mass)
 features <- computeFeatures.moment(labeled_img)
 
 if (is.null(features) || nrow(features) == 0) {
   cat("No objects found in the input image. Writing an empty image.\n")
-  # Create and write an empty (black) image with the same dimensions
   empty_img <- Image(0, dim=dim(img))
   writeImage(empty_img, outfile)
   cat("Done.\n")
@@ -94,7 +97,8 @@ if (is.null(features) || nrow(features) == 0) {
 
 # Extract and round the centroid coordinates to the nearest pixel
 centroids <- round(features[, c('m.cx', 'm.cy')])
-cat("Found", nrow(centroids), "objects. Replacing them with circles.\n")
+num_objects <- nrow(centroids)
+cat("Found", num_objects, "objects. Replacing them with circles of average intensity.\n")
 
 
 # --- Create New Image with Circles ---
@@ -102,10 +106,15 @@ cat("Found", nrow(centroids), "objects. Replacing them with circles.\n")
 # Create a new, empty (black) image with the same dimensions as the input
 output_img <- Image(0, dim = dim(img))
 
-# Iterate through each centroid and draw a filled white circle
-for (i in 1:nrow(centroids)) {
+# Iterate through each centroid and draw a filled circle
+for (i in 1:num_objects) {
   x_coord <- centroids[i, 'm.cx']
   y_coord <- centroids[i, 'm.cy']
+  
+  # --- KEY CHANGE ---
+  # Calculate the mean intensity of the pixels in the original image
+  # that correspond to the current blob label.
+  mean_intensity <- mean(img[labeled_img == i])
   
   # The drawCircle function returns the modified image
   output_img <- drawCircle(
@@ -113,8 +122,8 @@ for (i in 1:nrow(centroids)) {
     x = x_coord,
     y = y_coord,
     radius = options$radius,
-    col = 1,      # Draw in white
-    fill = TRUE   # Make the circle solid
+    col = mean_intensity, # Draw with the calculated average gray value
+    fill = TRUE           # Make the circle solid
   )
 }
 

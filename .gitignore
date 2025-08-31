@@ -13,4 +13,5 @@ hypnotoad.pid
 image_store/
 bin/.Rapp.history
 yolov8s-worldv2.pt
+bin/unet_endothel
 

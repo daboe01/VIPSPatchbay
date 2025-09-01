@@ -36,7 +36,6 @@ helper get_output_block => sub {
 
 my $IMAGE_STORE_DIR = Mojo::File->new('./image_store')->make_path->to_abs;
 my $CACHED_IMAGE_DIR = $IMAGE_STORE_DIR->child('cached_images')->make_path;
-# A dedicated directory for stateless processing to keep things clean
 my $STATELESS_TEMP_DIR = $IMAGE_STORE_DIR->child('stateless_temp')->make_path;
 
 
@@ -518,10 +517,10 @@ get '/VIPS/block/:block_id/image' => [block_id => qr/\d+/i] => sub {
     my $block_id = $self->param('block_id');
 
     # Query the cache for the most recently generated UUID for this specific block.
-    my $cached_info = $self->pg->db->query(
-        'SELECT uuid FROM image_cache WHERE idblock = ? ORDER BY creation_timestamp DESC LIMIT 1',
-        $block_id
-    )->hash;
+    my $cached_info = $self->pg->db->query  (
+                                                'SELECT uuid FROM image_cache WHERE idblock = ? ORDER BY creation_timestamp DESC LIMIT 1',
+                                                $block_id
+                                            )->hash;
 
     unless ($cached_info && $cached_info->{uuid}) {
         return $self->render(status => 404, text => 'No cached image output exists for this block.');
@@ -834,16 +833,9 @@ helper get_result_of_block_id_p => sub {
 
     my $block_info = $self->pg->db->query(q{
                                                 SELECT
-                                                bc.name,
-                                                bc.command,
-                                                bc.parameter_template,
-                                                bc.parameter_mappings,
-                                                bc.gui_fields,
-                                                b.connections,
-                                                b.output_value,
-                                                b.enabled
-                                                FROM blocks b
-                                                JOIN blocks_catalogue bc ON b.idblock = bc.id
+                                                bc.name, bc.command, bc.parameter_template, bc.parameter_mappings, bc.gui_fields,
+                                                b.connections, b.output_value, b.enabled
+                                                FROM blocks b JOIN blocks_catalogue bc ON b.idblock = bc.id
                                                 WHERE b.id = ?
                                             }, $id)->hash;
 
@@ -889,35 +881,25 @@ helper get_result_of_block_id_p => sub {
         unless ($sub_project_name) {
             return Mojo::Promise->reject("Sub-project block $id does not have a project name in auxfield.");
         }
-
-        # Find the sub-project's ID from its name.
         my $sub_project = $self->pg->db->query('SELECT id FROM projects WHERE name = ?', $sub_project_name)->hash;
         unless ($sub_project && $sub_project->{id}) {
             return Mojo::Promise->reject("Sub-project named '$sub_project_name' not found.");
         }
         my $sub_project_id = $sub_project->{id};
-
-        # Find the final output block of the sub-project.
         my $output_block = $self->get_output_block($sub_project_id);
-
         unless ($output_block && $output_block->{id}) {
             return Mojo::Promise->reject("Final output block not found for sub-project '$sub_project_name'.");
         }
-
         my @input_keys = keys %$conn;
         if (@input_keys != 1) {
             return Mojo::Promise->reject("Sub-project block $id must have exactly one input.");
         }
         my $input_block_id = $conn->{$input_keys[0]};
-
-        # Get the output of the connected input block
         return $self->get_result_of_block_id_p($input_block_id, $initial_input_uuid, $cache_dict)
-            ->then(sub {
-                my $sub_project_input_uuid = shift;
-                # Now execute the sub-project with this UUID as its input.
-                # Use a fresh cache for the sub-project to avoid conflicts.
-                return $self->get_result_of_block_id_p($output_block->{id}, $sub_project_input_uuid, {});
-            })->then(sub { $cache_dict->{$cache_key} = shift; });
+        ->then(sub {
+            my $sub_project_input_uuid = shift;
+            return $self->get_result_of_block_id_p($output_block->{id}, $sub_project_input_uuid, {});
+        })->then(sub { $cache_dict->{$cache_key} = shift; });
     }
 
     my @input_promises = map { $self->get_result_of_block_id_p($conn->{$_}, $initial_input_uuid, $cache_dict) } sort keys %$conn;
@@ -949,6 +931,7 @@ helper get_result_of_block_id_p => sub {
         my $ug = Data::UUID->new;
         my $output_uuid = $ug->create_str();
 
+        # ... (command assembly logic is unchanged) ...
         my %mapped_settings;
         for my $key (keys %$settings) {
             my $value = $settings->{$key};
@@ -958,7 +941,7 @@ helper get_result_of_block_id_p => sub {
         my @all_gui_fields = @{decode_json($block_info->{gui_fields} || '[]')};
         my @param_values;
         for my $key (@all_gui_fields) {
-            push @param_values, $mapped_settings{$key} // '';
+            push @param_values, $mapped_settings{$key};
         }
         my @positional_param_values;
         my @templated_args;
@@ -990,7 +973,6 @@ helper get_result_of_block_id_p => sub {
 
         my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path->to_string, @positional_param_values, @templated_args);
         @command_parts = grep { defined && $_ ne '' } @command_parts;
-        
         my $command_string = join ' ', map { my $arg = $_; $arg =~ s/'/'\\''/g; "'$arg'"; } @command_parts;
         $command_string .= ' 2>&1';
         app->log->debug("Executing shell command: sh -c \"$command_string\"");
@@ -1001,10 +983,40 @@ helper get_result_of_block_id_p => sub {
             exec('sh', '-c', $command_string);
         },
         sub {
-            my ($subprocess, $err) = @_;
+            my (undef, $err) = @_;
+
             if (-e $final_output_path && -s $final_output_path) {
-                $self->pg->db->insert('image_cache', { uuid => $output_uuid, idblock => $id, parameters_json => $params_json, input_uuids_json => $inputs_json });
-                $promise->resolve($output_uuid);
+
+                # 1. Attempt to insert the new cache entry using an UPSERT.
+                # This will do nothing if the entry already exists, preventing the error.
+                $self->pg->db->query(
+                                        q{
+                                            INSERT INTO image_cache (uuid, idblock, parameters_json, input_uuids_json)
+                                            VALUES (?, ?, ?, ?)
+                                            ON CONFLICT (idblock, parameters_json, input_uuids_json) DO NOTHING
+                                        },
+                                        $output_uuid, $id, $params_json, $inputs_json
+                                    );
+
+                # 2. Now, re-fetch the entry from the database. This guarantees we get the
+                # correct UUID, whether it was the one we just inserted or one that another
+                # worker inserted while we were busy.
+                my $final_cache_entry = $self->pg->db->query(
+                                                                'SELECT uuid FROM image_cache WHERE idblock = ? AND parameters_json = ? AND input_uuids_json = ?',
+                                                                $id, $params_json, $inputs_json
+                                                             )->hash;
+
+                if ($final_cache_entry && $final_cache_entry->{uuid}) {
+                    # If our generated UUID is different from the one in the DB, it means
+                    # we lost the race. Clean up our own generated file.
+                    if ($final_cache_entry->{uuid} ne $output_uuid) {
+                        unlink $final_output_path->to_string if -e $final_output_path;
+                    }
+                    $promise->resolve($final_cache_entry->{uuid});
+                } else {
+                    # This should be a very rare case, but we handle it for safety.
+                    $promise->reject("Failed to write or retrieve cache entry after processing.");
+                }
             } else {
                 app->log->error("Command execution failed for: $command_string");
                 if ($err) { app->log->error("Subprocess reported an error argument: $err"); }
@@ -1015,7 +1027,7 @@ helper get_result_of_block_id_p => sub {
             }
         }
         );
-        $subprocess->on(stdout => sub { my ($subprocess, $chunk) = @_; $output_buffer .= $chunk; });
+        $subprocess->on(stdout => sub { my (undef, $chunk) = @_; $output_buffer .= $chunk; });
 
         return $promise;
     })->then(sub {

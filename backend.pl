@@ -54,17 +54,31 @@ post '/VIPS/upload' => sub {
 
     for my $upload (@$uploads) {
         my $original_filename = $upload->filename;
-        # Extract the extension to preserve it
         my ($name, $path, $ext) = fileparse($original_filename, qr/\.[^.]*/);
         $ext //= ''; # Handle files with no extension gracefully
 
-        my $uuid_str          = $ug->create_str();
-        # New filename is uuid + original extension
-        my $destination_filename = $uuid_str . $ext;
-        my $destination_path  = $IMAGE_STORE_DIR->child($destination_filename);
+        my $uuid_str = $ug->create_str();
+        my $destination_filename = $uuid_str . '.png';
+        my $destination_path = $IMAGE_STORE_DIR->child($destination_filename);
 
-        # Store file on disk with UUID.ext as name
-        $upload->move_to($destination_path);
+        # If not a PNG, convert it
+        if (lc($ext) ne '.png') {
+            my $temp_path = $STATELESS_TEMP_DIR->child($uuid_str . $ext);
+            $upload->move_to($temp_path);
+
+            my @cmd = ('vips', 'pngsave', $temp_path->to_string, $destination_path->to_string);
+            my $output = `@cmd 2>&1`;
+
+            if ($? != 0) {
+                $self->app->log->error("VIPS conversion failed for '$original_filename': $output");
+                unlink $temp_path if -e $temp_path;
+                next; # Skip to the next file
+            }
+            unlink $temp_path;
+        } else {
+            # It's already a PNG, just move it.
+            $upload->move_to($destination_path);
+        }
 
         # Record in the database with the base UUID
         $self->pg->db->insert('input_images', {

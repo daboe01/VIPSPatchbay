@@ -831,6 +831,30 @@ del '/VIPS/:table/:pk/:key' => [key=>qr/\d+/] => sub
 
     $self->render(json => {err => $DBI::errstr});
 };
+
+del '/VIPS/input_images/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
+    my $self = shift;
+    my $uuid = $self->param('uuid');
+
+    # Find the image file path
+    my $image_path = $self->find_image_path_by_uuid($uuid);
+
+    # Delete the file from disk
+    if ($image_path && -e $image_path) {
+        if (!unlink $image_path) {
+            $self->app->log->warn("Could not delete file $image_path: $!");
+        }
+    }
+
+    # Delete from database
+    my $res = $self->pg->db->delete('input_images', {uuid => $uuid});
+
+    if ($res->rows) {
+        return $self->render(status => 200, text => 'OK');
+    } else {
+        return $self->render(status => 404, text => 'Not Found');
+    }
+};
 #
 # end: generic DBI interface
 #

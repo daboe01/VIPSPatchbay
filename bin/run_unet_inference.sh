@@ -1,25 +1,29 @@
 #!/bin/bash
 
-# This script acts as a simple bridge between the backend and the complex
-# UNet inference command.
-# The backend will call this script like:
-#   run_unet_inference.sh /path/to/input.png /path/to/output.png
+# This script is a flexible bridge for the UNet inference command.
+# The backend will now call this script with THREE arguments:
+#   run_unet_inference_v2.sh <INFILE> <OUTFILE> <MODEL_PATH>
 
 # --- Configuration ---
-# Set the full, absolute paths to your Python executable, script, and model file.
+# Paths to the Python executable and inference script remain fixed.
 PYTHON_EXEC="/Users/daboe01/src/VIPSPatchbay/bin/unet_endothel/unet-env/bin/python3"
 INFERENCE_SCRIPT="/Users/daboe01/src/VIPSPatchbay/bin/unet_endothel/inference.py"
-MODEL_PATH="/Users/daboe01/src/VIPSPatchbay/bin/unet_endothel/densenet_unet_corneal_endothelium.pth"
 
 # --- Argument Handling ---
-# The backend provides the input file as the first argument ($1)
-# and the output file as the second argument ($2).
+# The backend provides three positional arguments.
 INFILE="$1"
 OUTFILE="$2"
+MODEL_PATH="$3" # The model path is now the 3rd argument.
+
+# --- Input Validation ---
+# It's good practice to check if the model path was actually provided.
+if [ -z "$MODEL_PATH" ]; then
+    echo "Error: Model path was not provided as the third argument." >&2
+    exit 1
+fi
 
 # --- Execution ---
-# Execute the full, correctly formatted Python command.
-# Using quotes to handle any spaces in file paths.
+# The command now uses the MODEL_PATH variable passed from the backend.
 "$PYTHON_EXEC" "$INFERENCE_SCRIPT" \
     --model "$MODEL_PATH" \
     --input "$INFILE" \

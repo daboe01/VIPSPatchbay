@@ -182,6 +182,25 @@ BaseURL=HostURL+"/";
     id selectedInputUUID @accessors;
 
     id duplicateConnection;
+    id _deleteInputImageConnection;
+}
+
+- (void)deleteSelectedInputImage:(id)sender
+{
+    var selectedImage = [inputController selection];
+    if (!selectedImage) {
+        return;
+    }
+
+    var uuid = [selectedImage valueForKey:@"uuid"];
+    if (!uuid) {
+        return;
+    }
+
+    var request = [CPURLRequest requestWithURL:[CPURL URLWithString:@"/VIPS/input_images/" + uuid]];
+    [request setHTTPMethod:@"DELETE"];
+
+    _deleteInputImageConnection = [CPURLConnection connectionWithRequest:request delegate:self];
 }
 
 - (void)setThumbnailSize:(id)sender
@@ -407,6 +426,20 @@ BaseURL=HostURL+"/";
 
         duplicateConnection = nil;
     }
+    else if (aConnection == _deleteInputImageConnection)
+    {
+        [self reloadInputImages:nil];
+        _deleteInputImageConnection = nil;
+    }
+}
+
+- (void)connection:(CPConnection)aConnection didFailWithError:(CPError)anError
+{
+    if (aConnection == _deleteInputImageConnection)
+    {
+        [[TNGrowlCenter defaultCenter] pushNotificationWithTitle:@"Error" message:@"Failed to delete image: " + [anError localizedDescription] customIcon:TNGrowlIconError];
+        _deleteInputImageConnection = nil;
+    }
 }
 
 - (void)showInspector:(id)sender
@@ -488,6 +521,12 @@ BaseURL=HostURL+"/";
 
     [self setThumbnailSize:100];
     [self reloadOutputImages:self];
+
+    var inputImageMenu = [[CPMenu alloc] initWithTitle:@"Input Image Menu"];
+    var deleteMenuItem = [[CPMenuItem alloc] initWithTitle:@"Delete Image" action:@selector(deleteSelectedInputImage:) keyEquivalent:@""];
+    [deleteMenuItem setTarget:self];
+    [inputImageMenu addItem:deleteMenuItem];
+    [inputCollectionView setMenu:inputImageMenu];
 }
 
 @end

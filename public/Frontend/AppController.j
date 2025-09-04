@@ -83,6 +83,21 @@ BaseURL=HostURL+"/";
     [self loadView];
 }
 
+- (void)setSelected:(BOOL)flag
+{
+    [super setSelected:flag];
+
+    if (flag)
+    {
+        [[_imageView layer] setBorderColor:[CPColor blueColor]];
+        [[_imageView layer] setBorderWidth:4.0];
+    }
+    else
+    {
+        [[_imageView layer] setBorderWidth:0.0];
+    }
+}
+
 @end
 
 @implementation CGPTURLRequest : CPURLRequest

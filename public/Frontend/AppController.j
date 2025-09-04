@@ -316,6 +316,28 @@ BaseURL=HostURL+"/";
     [inputController remove:sender]
 }
 
+- (void)removeProject:(id)sender
+{
+    var alert = [CPAlert alertWithMessageText:@"Delete Project"
+                                 defaultButton:@"OK"
+                               alternateButton:@"Cancel"
+                                   otherButton:nil
+                     informativeTextWithFormat:@"Are you sure you want to delete the selected project?"];
+
+    [alert beginSheetModalForWindow:[CPApp keyWindow]
+                      modalDelegate:self
+                     didEndSelector:@selector(alertDidEnd:returnCode:contextInfo:)
+                        contextInfo:nil];
+}
+
+- (void)alertDidEnd:(CPAlert)alert returnCode:(int)returnCode contextInfo:(void)contextInfo
+{
+    if (returnCode == CPAlertDefaultReturn)
+    {
+        [projectsController remove:self];
+    }
+}
+
 - (void)removeBlocks:(id)sender
 {
     [laceViewController removeBlocks:sender]

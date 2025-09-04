@@ -245,21 +245,38 @@ BaseURL=HostURL+"/";
     [_editPopover showRelativeToRect:aView._frame ofView:aLaceView preferredEdge:nil];
 }
 
+- (void)deleteBlocksAlertDidEnd:(CPAlert)alert returnCode:(int)returnCode contextInfo:(void)contextInfo
+{
+    if (returnCode == 0)
+    {
+        var selectedBlocks = [_screenController selectedObjects];
+        var count = [selectedBlocks count];
+
+        // delete each block in backend separately
+        for(var i = 0; i < count; i++)
+        {
+            var dbo = [_blocksController._entity objectWithPK:[selectedBlocks[i] valueForKey:'id']];
+            [_blocksController._entity deleteObject:dbo];
+        }
+
+        setTimeout(function(){
+            [_blocksController reload];
+        }, 250)
+    }
+}
+
 - (void)removeBlocks:(id)sender
 {
-    var selectedBlocks = [_screenController selectedObjects];
-    var count = [selectedBlocks count];
+    var alert = [CPAlert alertWithMessageText:@"Delete Blocks"
+                                 defaultButton:@"OK"
+                               alternateButton:@"Cancel"
+                                   otherButton:nil
+                     informativeTextWithFormat:@"Are you sure you want to delete the selected blocks?"];
 
-    // delete each block in backend separately
-    for(var i = 0; i < count; i++)
-    {
-        var dbo = [_blocksController._entity objectWithPK:[selectedBlocks[i] valueForKey:'id']];
-        [_blocksController._entity deleteObject:dbo];
-    }
-
-    setTimeout(function(){
-        [_blocksController reload];
-    }, 250)
+    [alert beginSheetModalForWindow:[CPApp keyWindow]
+                      modalDelegate:self
+                     didEndSelector:@selector(deleteBlocksAlertDidEnd:returnCode:contextInfo:)
+                        contextInfo:nil];
 }
 
 - (void)performAddBlocks:(id)sender

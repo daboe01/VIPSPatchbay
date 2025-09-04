@@ -332,9 +332,9 @@ BaseURL=HostURL+"/";
 
 - (void)alertDidEnd:(CPAlert)alert returnCode:(int)returnCode contextInfo:(void)contextInfo
 {
-    if (returnCode == CPAlertDefaultReturn)
+    if (returnCode == 0)
     {
-        [projectsController remove:self];
+       [projectsController remove:self];
     }
 }
 

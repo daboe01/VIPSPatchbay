@@ -95,3 +95,26 @@ This simple XML generates a professional, fully-functional UI component without 
 *   **Backend:** **[Mojolicious::Lite](https://mojolicious.org/)**
 *   **Database:** **[PostgreSQL](https://www.postgresql.org/)**
 *   **Image Processing Engines:** [libvips](https://www.libvips.org/), [ImageMagick](https://imagemagick.org/), `R` (e.g. [EBImage](https://bioconductor.org/packages/release/bioc/html/EBImage.html)), `Python 3` (e.g. [ultralytics](https://www.ultralytics.com/))
+
+## Installation
+
+> [!NOTE]
+> These instructions are based on the current understanding of the environment and have not been tested.
+
+This application is designed to be run in a Docker container. A `Dockerfile` is provided to build the environment.
+
+### Building the Docker Image
+
+1.  **Build the image:**
+    ```sh
+    docker build -t patchbay-vips .
+    ```
+
+### Running the Application
+
+1.  **Run the container:**
+    ```sh
+    docker run -p 3036:3036 patchbay-vips
+    ```
+2.  **Access the application:**
+    Open your web browser and navigate to `http://localhost:3036`.

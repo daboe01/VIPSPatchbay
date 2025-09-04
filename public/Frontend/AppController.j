@@ -187,20 +187,16 @@ BaseURL=HostURL+"/";
 
 - (void)deleteSelectedInputImage:(id)sender
 {
-    var selectedImage = [inputController selection];
-    if (!selectedImage) {
-        return;
-    }
+    var alert = [CPAlert alertWithMessageText:@"Delete Image"
+                                 defaultButton:@"OK"
+                               alternateButton:@"Cancel"
+                                   otherButton:nil
+                     informativeTextWithFormat:@"Are you sure you want to delete the selected image?"];
 
-    var uuid = [selectedImage valueForKey:@"uuid"];
-    if (!uuid) {
-        return;
-    }
-
-    var request = [CPURLRequest requestWithURL:[CPURL URLWithString:@"/VIPS/input_images/" + uuid]];
-    [request setHTTPMethod:@"DELETE"];
-
-    _deleteInputImageConnection = [CPURLConnection connectionWithRequest:request delegate:self];
+    [alert beginSheetModalForWindow:[CPApp keyWindow]
+                      modalDelegate:self
+                     didEndSelector:@selector(deleteImageAlertDidEnd:returnCode:contextInfo:)
+                        contextInfo:nil];
 }
 
 - (void)setThumbnailSize:(id)sender
@@ -335,6 +331,27 @@ BaseURL=HostURL+"/";
     if (returnCode == 0)
     {
        [projectsController remove:self];
+    }
+}
+
+- (void)deleteImageAlertDidEnd:(CPAlert)alert returnCode:(int)returnCode contextInfo:(void)contextInfo
+{
+    if (returnCode == 0)
+    {
+        var selectedImage = [inputController selection];
+        if (!selectedImage) {
+            return;
+        }
+
+        var uuid = [selectedImage valueForKey:@"uuid"];
+        if (!uuid) {
+            return;
+        }
+
+        var request = [CPURLRequest requestWithURL:[CPURL URLWithString:@"/VIPS/input_images/" + uuid]];
+        [request setHTTPMethod:@"DELETE"];
+
+        _deleteInputImageConnection = [CPURLConnection connectionWithRequest:request delegate:self];
     }
 }
 

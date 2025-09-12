@@ -57,7 +57,7 @@ post '/VIPS/upload' => sub {
         my ($name, $path, $ext) = fileparse($original_filename, qr/\.[^.]*/);
         $ext //= ''; # Handle files with no extension gracefully
 
-        my $uuid_str = $ug->create_str();
+        my $uuid_str = lc $ug->create_str();
         my $destination_filename = $uuid_str . '.png';
         my $destination_path = $IMAGE_STORE_DIR->child($destination_filename);
 
@@ -103,7 +103,7 @@ helper find_image_path_by_uuid => sub {
 
     for my $dir (@search_dirs) {
         my $found_file = $dir->list({dir => 0})->first(sub {
-            $_->basename =~ /^\Q$uuid\E(\.|$)/
+            $_->basename =~ /^\Q$uuid\E(\.|$)/i
         });
         return $found_file if $found_file;
     }
@@ -203,7 +203,7 @@ helper run_stateless_pipeline => sub {
 
     # --- COMMAND EXECUTION ---
     my $ug = Data::UUID->new;
-    my $output_uuid = $ug->create_str();
+    my $output_uuid = lc $ug->create_str();
 
     my %mapped_settings;
     for my $key (keys %$settings) {
@@ -284,7 +284,7 @@ post '/vips/process_image_statelessly/:idproject' => [idproject => qr/\d+/] => s
     });
 
     my $ug = Data::UUID->new;
-    my $temp_input_uuid = $ug->create_str();
+    my $temp_input_uuid = lc $ug->create_str();
     my (undef, undef, $ext) = fileparse($upload->filename, qr/\.[^.]*/);
     my $temp_input_path = $STATELESS_TEMP_DIR->child($temp_input_uuid . ($ext // '.tmp'));
     $upload->move_to($temp_input_path);
@@ -393,13 +393,13 @@ get '/VIPS/preview/:uuid' => [uuid => qr/[0-9a-f\-]+/i] => sub {
     my $uuid = $self->param('uuid');
 
     # Find the source file by its base UUID, regardless of extension
-    my $source_file = $self->find_image_path_by_uuid($uuid);
+    my $source_file = lc $self->find_image_path_by_uuid($uuid);
 
     # Security check is implicitly handled by the helper, just check for existence
     unless ($source_file && -e $source_file) {
         return $self->render(status => 404, text => 'Not Found');
     }
-
+    warn $source_file;
     return $self->reply->file($source_file);
 };
 
@@ -967,7 +967,7 @@ helper get_result_of_block_id_p => sub {
 
         my $promise = Mojo::Promise->new;
         my $ug = Data::UUID->new;
-        my $output_uuid = $ug->create_str();
+        my $output_uuid = lc $ug->create_str();
 
         # ... (command assembly logic is unchanged) ...
         my %mapped_settings;
@@ -1006,7 +1006,8 @@ helper get_result_of_block_id_p => sub {
             push @input_file_paths, $input_file->to_string;
         }
 
-        my $final_output_path = $CACHED_IMAGE_DIR->child($output_uuid . '.png');
+        my $final_output_path = $CACHED_IMAGE_DIR->child( $output_uuid . '.png');
+        warn $final_output_path;
         return $promise->reject("Command not defined for block $id") unless $block_info->{command};
 
         my @command_parts = ($block_info->{command}, $block_info->{name}, @input_file_paths, $final_output_path->to_string, @positional_param_values, @templated_args);

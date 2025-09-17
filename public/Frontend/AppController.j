@@ -341,6 +341,11 @@ BaseURL=HostURL+"/";
                         contextInfo:nil];
 }
 
+- (void)insertProject:(id)sender
+{
+       [projectsController insert:self];
+}
+
 - (void)alertDidEnd:(CPAlert)alert returnCode:(int)returnCode contextInfo:(void)contextInfo
 {
     if (returnCode == 0)

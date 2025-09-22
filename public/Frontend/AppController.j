@@ -200,6 +200,20 @@ BaseURL=HostURL+"/";
     id _deleteInputImageConnection;
 }
 
+- (void)collectionView:(CPView)someView didDoubleClickOnItemAtIndex:(unsigned)someIndex
+{
+   var dataObject = [[someView itemAtIndex:someIndex] representedObject];
+
+    if (dataObject)
+    {
+        var imageURL = [dataObject valueForKey:@"url"];
+        if (imageURL)
+        {
+            window.open(imageURL);
+        }
+    }
+}
+
 - (void)deleteSelectedInputImage:(id)sender
 {
     var alert = [CPAlert alertWithMessageText:@"Delete Image"

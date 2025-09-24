@@ -33,27 +33,44 @@ BaseURL=HostURL+"/";
 
 @implementation SimpleImageViewCollectionItem : CPCollectionViewItem
 {
+    CPBox       _boxView;
     CPImageView _imageView;
 }
 
-- (void)imageDidFinishLoading:(CPImage)anImage
+// Called when the image delegate (self) receives the loaded image.
+- (void)imageDidLoad:(CPImage)anImage
 {
     var imageSize = [anImage size];
-    if (imageSize.width > 0 && imageSize.height > 0) {
+
+    if (imageSize.width > 0 && imageSize.height > 0)
+    {
         [_imageView setFrameSize:imageSize];
-        // We might need to tell the collection view to re-layout its items
+        [_boxView sizeToFit];
         [[self collectionView] setNeedsLayout:YES];
     }
 }
 
+// Loads and sets up the view for the collection item.
 - (CPView)loadView
 {
-    if (!_imageView) {
+    // Initialize the views only if they haven't been created yet.
+    if (!_boxView)
+    {
+        // The CPBox will draw the selection border.
+        _boxView = [CPBox new];
+        [_boxView setBorderType:CPNoBorder];
+        [_boxView setContentViewMargins:CGSizeMake(3, 3)];
+
+        // The CPImageView displays the image and is placed inside the box.
         _imageView = [CPImageView new];
         [_imageView setImageScaling:CPImageScaleProportionallyUpOrDown];
+
+        // Set the image view as the content of the box.
+        [_boxView setContentView:_imageView];
     }
-    
-    [self setView:_imageView];
+
+    // Set the box as the primary view for this item.
+    [self setView:_boxView]; // _boxView _imageView
 
     var dataObject = [self representedObject];
 
@@ -62,44 +79,48 @@ BaseURL=HostURL+"/";
         var imageURL = [dataObject valueForKey:@"url"];
 
         if (!imageURL)
-            imageURL = "/VIPS/preview/" + [dataObject valueForKey:@"uuid"]; //+ "?w=100";
+            imageURL = "/VIPS/preview/" + [dataObject valueForKey:@"uuid"];
 
+        // Asynchronously load the image.
         var image = [[CPImage alloc] initWithContentsOfFile:imageURL];
         [image setDelegate:self];
         [_imageView setImage:image];
-
     }
     else
     {
         [_imageView setImage:nil];
     }
 
-    return _imageView;
+    return _boxView;
 }
 
+// Ensures the view is loaded when a new data object is associated with this item.
 - (void)setRepresentedObject:(id)anObject
 {
     [super setRepresentedObject:anObject];
     [self loadView];
 }
 
+// Handles the visual state of the item (selected/deselected).
 - (void)setSelected:(BOOL)flag
 {
     [super setSelected:flag];
 
+    // Apply or remove the selection border on the container box.
     if (flag)
     {
-        [[_imageView layer] setBorderColor:[CPColor blueColor]];
-        [[_imageView layer] setBorderWidth:4.0];
+        [_boxView setBorderType:CPLineBorder];
+        [_boxView setBorderColor:[CPColor blueColor]];
+        [_boxView setBorderWidth:4.0];
     }
     else
     {
-        [[_imageView layer] setBorderWidth:0.0];
+        [_boxView setBorderType:CPNoBorder];
+        [_boxView setBorderWidth:0.0];
     }
 }
 
 @end
-
 @implementation CGPTURLRequest : CPURLRequest
 
 - (id)initWithURL:(CPURL)anURL cachePolicy:(CPURLRequestCachePolicy)aCachePolicy timeoutInterval:(CPTimeInterval)aTimeoutInterval

@@ -1,6 +1,6 @@
 # PatchbayVIPS
 
-**A Desktop-Class Visual Programming Environment for High-Performance Image Analysis, right in your browser.**
+**A Visual Programming Environment for High-Performance Image Analysis, right in your browser.**
 
 PatchbayVIPS is a professional-grade, web-based tool for designing, inspecting, and executing complex image processing pipelines. It delivers a fluid, desktop-application experience by combining a sophisticated **[Cappuccino](https://www.cappuccino.dev/)** frontend with a powerful, asynchronous **[Mojolicious](https://mojolicious.org/)** backend.
 
